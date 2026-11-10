@@ -104,7 +104,17 @@ interface AuthContextType {
     pin: string;
     avatarFile?: File | null;
   }) => Promise<void>;
-  changeAccountPassword: (newPassword: string, currentPassword?: string) => Promise<void>;
+  changeAccountPassword: (
+    newPassword: string,
+    currentPassword?: string,
+    confirmPassword?: string,
+    isRecoveryAfter5Attempts?: boolean
+  ) => Promise<void>;
+  resetForgottenPassword: (
+    identifier: string,
+    newPassword: string,
+    confirmPassword: string
+  ) => Promise<void>;
   setupOrChangePin: (newPin: string, currentPin?: string) => Promise<void>;
   verifySessionPin: (pin: string) => Promise<boolean>;
   resetPinWithReauth: (currentPin?: string) => Promise<void>;
@@ -514,12 +524,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setFailedPinAttempts(nextAttempts);
 
         if (nextAttempts >= MAX_PIN_ATTEMPTS) {
-          const until = Date.now() + PIN_LOCKOUT_DURATION_MS;
-          localStorage.setItem(getPinLockoutStorageKey(uid), String(until));
-          setPinLockoutSecondsLeft(Math.ceil(PIN_LOCKOUT_DURATION_MS / 1000));
-          const lockMsg = 'Превышен лимит попыток! Вход заблокирован на 30 секунд.';
-          setAuthError(lockMsg);
-          throw new Error(lockMsg);
+          const resetMsg =
+            'Вы не вспомнили пароль за 5 попыток. Введите новый пароль и подтвердите его.';
+          setAuthError(resetMsg);
+          throw new Error('MAX_PASSWORD_ATTEMPTS_REACHED');
         }
 
         const left = Math.max(0, MAX_PIN_ATTEMPTS - nextAttempts);
@@ -540,12 +548,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setFailedPinAttempts(nextAttempts);
 
         if (nextAttempts >= MAX_PIN_ATTEMPTS) {
-          const until = Date.now() + PIN_LOCKOUT_DURATION_MS;
-          localStorage.setItem(getPinLockoutStorageKey(uid), String(until));
-          setPinLockoutSecondsLeft(Math.ceil(PIN_LOCKOUT_DURATION_MS / 1000));
-          const lockMsg = 'Превышен лимит попыток! Вход заблокирован на 30 секунд.';
-          setAuthError(lockMsg);
-          throw new Error(lockMsg);
+          const resetMsg =
+            'Вы не вспомнили пароль за 5 попыток. Введите новый пароль и подтвердите его.';
+          setAuthError(resetMsg);
+          throw new Error('MAX_PASSWORD_ATTEMPTS_REACHED');
         }
 
         const left = Math.max(0, MAX_PIN_ATTEMPTS - nextAttempts);
@@ -1039,26 +1045,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Установка или смена основного пароля аккаунта (с обязательной проверкой текущего пароля, если он уже задан)
+   * Смена пароля аккаунта:
+   * - По умолчанию проверяет текущий пароль (до 5 попыток).
+   * - После 5 неудачных попыток (isRecoveryAfter5Attempts === true) переключается на ввод нового пароля и его подтверждение.
    */
-  const changeAccountPassword = async (newPassword: string, currentPassword?: string) => {
+  const changeAccountPassword = async (
+    newPassword: string,
+    currentPassword?: string,
+    confirmPassword?: string,
+    isRecoveryAfter5Attempts?: boolean
+  ) => {
     if (!firebaseUser || !privateData) return;
     if (!newPassword || newPassword.length < 6) {
       throw new Error('Новый пароль должен содержать минимум 6 символов');
     }
 
     if (privateData.passwordHash && privateData.passwordSalt) {
-      if (!currentPassword) {
-        throw new Error('Для смены пароля введите текущий пароль');
+      if (isRecoveryAfter5Attempts) {
+        if (!confirmPassword || newPassword !== confirmPassword) {
+          throw new Error('Новый пароль и подтверждение пароля не совпадают!');
+        }
+      } else {
+        if (!currentPassword) {
+          throw new Error('Введите текущий пароль');
+        }
+        const isCurrentValid = await verifyPasswordHash(
+          currentPassword,
+          privateData.passwordSalt,
+          privateData.passwordHash
+        );
+        if (!isCurrentValid) {
+          throw new Error('INVALID_CURRENT_PASSWORD');
+        }
       }
-      const isCurrentValid = await verifyPasswordHash(
-        currentPassword,
-        privateData.passwordSalt,
-        privateData.passwordHash
-      );
-      if (!isCurrentValid) {
-        throw new Error('Неверный текущий пароль! Изменение отклонено.');
-      }
+    } else if (confirmPassword !== undefined && newPassword !== confirmPassword) {
+      throw new Error('Новый пароль и подтверждение пароля не совпадают!');
     }
 
     const passwordSalt = generateSalt(16);
@@ -1073,6 +1094,126 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `users_private/${firebaseUser.uid}`);
     }
+  };
+
+  /**
+   * Сброс забытого пароля на экране входа: сразу ввод нового пароля и его подтверждение
+   */
+  const resetForgottenPassword = async (
+    rawIdentifier: string,
+    newPassword: string,
+    confirmPassword: string
+  ) => {
+    setAuthError(null);
+    const trimmed = rawIdentifier.trim();
+    const lowered = trimmed.toLowerCase();
+    if (!lowered) {
+      const msg = 'Введите @юзернейм, имя или почту аккаунта';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+    if (!newPassword || newPassword.length < 6) {
+      const msg = 'Новый пароль должен содержать минимум 6 символов';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+    if (newPassword !== confirmPassword) {
+      const msg = 'Новый пароль и подтверждение не совпадают!';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    const isEmailFormat = lowered.includes('@') && !lowered.startsWith('@');
+    const normalizedEmail = isEmailFormat
+      ? lowered
+      : `${lowered.replace(/^@/, '')}@mender.app`;
+    let uid = await deriveUidFromEmail(normalizedEmail);
+
+    let publicRef = doc(db, 'users', uid);
+    let privateRef = doc(db, 'users_private', uid);
+    let [pubSnap, privSnap] = await Promise.all([getDoc(publicRef), getDoc(privateRef)]);
+
+    if (!pubSnap.exists()) {
+      const cleanUsernameQuery = lowered.replace(/^@/, '').trim();
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('status', 'in', ['online', 'offline', 'busy'])
+      );
+      const usersSnap = await getDocs(usersQuery);
+      const allUsers = usersSnap.docs.map(d => d.data() as UserPublic);
+
+      let matchedUser = allUsers.find(
+        u => u.username && u.username.toLowerCase() === cleanUsernameQuery
+      );
+      if (!matchedUser) {
+        matchedUser = allUsers.find(
+          u => u.displayName && u.displayName.trim().toLowerCase() === lowered
+        );
+      }
+      if (!matchedUser && cleanUsernameQuery.length >= 2) {
+        matchedUser = allUsers.find(
+          u =>
+            u.username?.toLowerCase() === cleanUsernameQuery ||
+            u.displayName?.trim().toLowerCase().split(/\s+/).includes(lowered) ||
+            u.displayName?.trim().toLowerCase().includes(lowered)
+        );
+      }
+
+      if (matchedUser) {
+        uid = matchedUser.uid;
+        publicRef = doc(db, 'users', uid);
+        privateRef = doc(db, 'users_private', uid);
+        [pubSnap, privSnap] = await Promise.all([getDoc(publicRef), getDoc(privateRef)]);
+      }
+    }
+
+    if (!pubSnap.exists()) {
+      const msg = 'Аккаунт с таким @юзернеймом, именем или почтой не найден!';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    const existingPub = pubSnap.data() as UserPublic;
+    const existingPriv = privSnap.exists() ? (privSnap.data() as UserPrivate) : null;
+
+    const passwordSalt = generateSalt(16);
+    const passwordHash = await hashPassword(newPassword, passwordSalt);
+
+    await updateDoc(privateRef, {
+      passwordHash,
+      passwordSalt,
+      updatedAt: serverTimestamp(),
+    });
+
+    localStorage.setItem(getPinAttemptsStorageKey(uid), '0');
+    localStorage.removeItem(getPinLockoutStorageKey(uid));
+    setFailedPinAttempts(0);
+
+    await updateDoc(publicRef, {
+      status: 'online',
+      updatedAt: serverTimestamp(),
+    });
+
+    const sessionUser: SessionUser = {
+      uid,
+      email: existingPriv?.email || normalizedEmail,
+      displayName: existingPub.displayName,
+      photoURL: existingPub.avatarUrl,
+      phoneNumber: null,
+    };
+
+    localStorage.setItem(EMAIL_SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
+
+    const requires2FaPin = Boolean(existingPriv?.pinHash && existingPriv?.twoFactorEnabled);
+    if (requires2FaPin) {
+      setIsPinVerified(false);
+      sessionStorage.removeItem(getPinVerifiedStorageKey(uid));
+    } else {
+      setIsPinVerified(true);
+      sessionStorage.setItem(getPinVerifiedStorageKey(uid), 'true');
+    }
+
+    setFirebaseUser(sessionUser);
   };
 
   /**
@@ -1451,6 +1592,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         confirmPhoneOtp,
         completeOnboardingProfile,
         changeAccountPassword,
+        resetForgottenPassword,
         setupOrChangePin,
         verifySessionPin,
         resetPinWithReauth,

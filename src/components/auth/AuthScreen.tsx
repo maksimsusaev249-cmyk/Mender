@@ -37,6 +37,7 @@ export const AuthScreen: React.FC = () => {
     authError,
     clearAuthError,
     loginWithEmailAccount,
+    resetForgottenPassword,
     registerWithEmailAccount,
     loginWithGoogle,
     sendPhoneOtp,
@@ -55,6 +56,9 @@ export const AuthScreen: React.FC = () => {
   const [loginIdentifier, setLoginIdentifier] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [emailNameInput, setEmailNameInput] = useState('');
   const [registerUsernameInput, setRegisterUsernameInput] = useState('');
   const [emailPinInput, setEmailPinInput] = useState('');
@@ -419,6 +423,29 @@ export const AuthScreen: React.FC = () => {
       setLocalError('Введите ваш @юзернейм, имя или почту');
       return;
     }
+    if (isResettingPassword) {
+      if (resetNewPassword.length < 6) {
+        setLocalError('Новый пароль должен содержать минимум 6 символов');
+        return;
+      }
+      if (resetNewPassword !== resetConfirmPassword) {
+        setLocalError('Новый пароль и подтверждение не совпадают!');
+        return;
+      }
+      setIsLoading(true);
+      try {
+        await resetForgottenPassword(
+          loginIdentifier.trim(),
+          resetNewPassword,
+          resetConfirmPassword
+        );
+      } catch (err: any) {
+        setLocalError(err?.message || 'Ошибка установки нового пароля');
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
     if (!passwordInput) {
       setLocalError('Введите пароль от аккаунта');
       return;
@@ -427,7 +454,15 @@ export const AuthScreen: React.FC = () => {
     try {
       await loginWithEmailAccount(loginIdentifier.trim(), passwordInput);
     } catch (err: any) {
-      setLocalError(err?.message || 'Ошибка входа');
+      if (err?.message === 'MAX_PASSWORD_ATTEMPTS_REACHED') {
+        setIsResettingPassword(true);
+        setPasswordInput('');
+        setLocalError(
+          'Использовано 5 из 5 попыток! Введите новый пароль и подтвердите его.'
+        );
+      } else {
+        setLocalError(err?.message || 'Ошибка входа');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -616,24 +651,88 @@ export const AuthScreen: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-[#19191A] mb-1.5">
-                Пароль
-              </label>
-              <input
-                type="password"
-                value={passwordInput}
-                onChange={e => setPasswordInput(e.target.value)}
-                placeholder=""
-                className="v7-input"
-                required
-              />
-            </div>
+            {!isResettingPassword ? (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-[#19191A]">
+                    Пароль
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetMessages();
+                      setIsResettingPassword(true);
+                    }}
+                    className="text-xs font-semibold text-[#0077FF] hover:underline cursor-pointer"
+                  >
+                    Забыли пароль?
+                  </button>
+                </div>
+                <input
+                  type="password"
+                  value={passwordInput}
+                  onChange={e => setPasswordInput(e.target.value)}
+                  placeholder=""
+                  className="v7-input"
+                  required
+                />
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl bg-[#F7F8FA] border border-[#E1E3E6] space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#19191A]">
+                    Установить новый пароль
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetMessages();
+                      setIsResettingPassword(false);
+                    }}
+                    className="text-xs font-semibold text-[#0077FF] hover:underline cursor-pointer"
+                  >
+                    Вспомнил пароль
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#19191A] mb-1">
+                    Новый пароль (минимум 6 символов)
+                  </label>
+                  <input
+                    type="password"
+                    value={resetNewPassword}
+                    onChange={e => setResetNewPassword(e.target.value)}
+                    placeholder=""
+                    className="v7-input"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[#19191A] mb-1">
+                    Подтвердите новый пароль
+                  </label>
+                  <input
+                    type="password"
+                    value={resetConfirmPassword}
+                    onChange={e => setResetConfirmPassword(e.target.value)}
+                    placeholder=""
+                    className="v7-input"
+                    required
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="v7-btn-list pt-1">
               <button type="submit" disabled={isLoading} className="v7-btn justify-center py-2.5">
                 <LogIn className="w-4 h-4 shrink-0" />
-                <span>{isLoading ? 'Вход в аккаунт...' : 'Войти в Mender'}</span>
+                <span>
+                  {isLoading
+                    ? 'Подождите...'
+                    : isResettingPassword
+                    ? 'Подтвердить новый пароль и войти'
+                    : 'Войти в Mender'}
+                </span>
               </button>
 
               <button

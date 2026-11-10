@@ -150,11 +150,20 @@ export const CallModal: React.FC = () => {
   const isGroupCall = groupCallParticipants.length > 1;
 
   return (
-    <div className="fixed inset-0 bg-[#070814]/95 backdrop-blur-xl flex items-center justify-center p-3 md:p-6 z-50 text-white select-none">
+    <div
+      onDoubleClick={() => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen?.().catch(() => {});
+        } else {
+          document.exitFullscreen?.().catch(() => {});
+        }
+      }}
+      className="fixed inset-0 w-screen h-[100dvh] bg-[#070814] z-50 text-white select-none overflow-hidden"
+    >
       {/* Dedicated hidden audio element so WebRTC voice audio always plays in real time */}
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
 
-      <div className="relative w-full max-w-md h-[90vh] max-h-[780px] rounded-[36px] overflow-hidden bg-gradient-to-b from-[#1A133B] via-[#11132E] to-[#090B1A] border-2 border-[#32386E] shadow-[0_24px_80px_rgba(0,0,0,0.85)] flex flex-col justify-between">
+      <div className="relative w-full h-full overflow-hidden bg-gradient-to-b from-[#1A133B] via-[#11132E] to-[#090B1A] flex flex-col justify-between">
         {/* Main Remote Video / Avatar / Group Grid Backdrop */}
         <div className="absolute inset-0">
           {hasRemoteVideo ? (
@@ -165,27 +174,27 @@ export const CallModal: React.FC = () => {
               className="w-full h-full object-cover"
             />
           ) : isGroupCall ? (
-            <div className="w-full h-full flex flex-col justify-center bg-[radial-gradient(circle_at_50%_30%,rgba(124,58,237,0.35),rgba(10,12,28,0.95))] p-5 pt-20 pb-28 overflow-y-auto">
-              <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-indigo-300 mb-3">
+            <div className="w-full h-full flex flex-col justify-center bg-[radial-gradient(circle_at_50%_30%,rgba(124,58,237,0.35),rgba(10,12,28,0.95))] p-4 sm:p-8 pt-20 pb-28 overflow-y-auto">
+              <div className="flex items-center justify-center gap-1.5 text-xs sm:text-sm font-semibold text-indigo-300 mb-4">
                 <Users className="w-4 h-4" />
                 <span>Групповой звонок ({groupCallParticipants.length + 1} уч.)</span>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4 max-w-6xl mx-auto w-full">
                 {groupCallParticipants.map(part => (
                   <div
                     key={part.uid}
-                    className="rounded-2xl bg-[#141736]/90 border border-[#2E356B] p-3 flex flex-col items-center justify-center text-center"
+                    className="rounded-2xl bg-[#141736]/90 border border-[#2E356B] p-4 sm:p-6 flex flex-col items-center justify-center text-center"
                   >
                     <img
                       src={part.avatarUrl}
                       alt={part.displayName}
-                      className="w-16 h-16 rounded-full object-cover ring-2 ring-[#7C3AED] mb-2"
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover ring-2 ring-[#7C3AED] mb-2.5"
                     />
-                    <span className="text-xs font-bold text-white truncate max-w-full">
+                    <span className="text-xs sm:text-sm font-bold text-white truncate max-w-full">
                       {part.displayName}
                     </span>
                     <span
-                      className={`text-[10px] font-mono mt-0.5 ${
+                      className={`text-[10px] sm:text-xs font-mono mt-0.5 ${
                         part.status === 'connected' ? 'text-emerald-400' : 'text-amber-300'
                       }`}
                     >
@@ -197,14 +206,14 @@ export const CallModal: React.FC = () => {
             </div>
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center bg-[radial-gradient(circle_at_50%_30%,rgba(124,58,237,0.35),rgba(10,12,28,0.95))] p-6 text-center">
-              <div className="relative mb-4">
+              <div className="relative mb-5">
                 <img
                   src={displayPeerAvatar}
                   alt={displayPeerName}
-                  className="w-32 h-32 rounded-full object-cover ring-4 ring-[#8B5CF6]/60 shadow-[0_0_40px_rgba(139,92,246,0.6)]"
+                  className="w-32 h-32 sm:w-40 sm:h-40 rounded-full object-cover ring-4 ring-[#8B5CF6]/60 shadow-[0_0_40px_rgba(139,92,246,0.6)]"
                 />
               </div>
-              <p className="text-xs text-[#B4BCE6] max-w-xs">
+              <p className="text-xs sm:text-sm text-[#B4BCE6] max-w-md">
                 {activeCall.status === 'ringing'
                   ? 'Вызов собеседника в реальном времени (WebRTC)...'
                   : activeCall.isScreenSharing
@@ -217,21 +226,21 @@ export const CallModal: React.FC = () => {
         </div>
 
         {/* Top Bar: < | Peer Name + Status/Timer | X */}
-        <div className="relative z-10 flex items-center justify-between px-5 pt-5 pb-3">
+        <div className="relative z-10 flex items-center justify-between px-4 sm:px-8 pt-4 sm:pt-6 pb-3">
           <button
             type="button"
             onClick={declineOrEndCall}
-            className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md flex items-center justify-center text-white transition-colors cursor-pointer"
+            className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md flex items-center justify-center text-white transition-colors cursor-pointer"
             title="Свернуть / Выйти"
           >
             <ChevronLeft className="w-5 h-5" />
           </button>
 
           <div className="text-center min-w-0 px-2">
-            <h3 className="text-base font-extrabold text-white truncate">
+            <h3 className="text-base sm:text-lg font-extrabold text-white truncate">
               {displayPeerName}
             </h3>
-            <p className="text-xs text-[#D5DAFF] font-mono mt-0.5">
+            <p className="text-xs sm:text-sm text-[#D5DAFF] font-mono mt-0.5">
               {activeCall.status === 'connected'
                 ? formatDuration(durationSeconds)
                 : 'Вызов...'}
@@ -241,7 +250,7 @@ export const CallModal: React.FC = () => {
           <button
             type="button"
             onClick={declineOrEndCall}
-            className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md flex items-center justify-center text-white transition-colors cursor-pointer"
+            className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 backdrop-blur-md flex items-center justify-center text-white transition-colors cursor-pointer"
             title="Закрыть"
           >
             <X className="w-5 h-5" />
@@ -249,8 +258,8 @@ export const CallModal: React.FC = () => {
         </div>
 
         {/* Picture-in-Picture (PIP) Self-View in Top-Right */}
-        <div className="relative z-10 flex-1 px-5 pointer-events-none">
-          <div className="ml-auto w-28 h-38 rounded-2xl overflow-hidden bg-[#151836] border-2 border-white/25 shadow-2xl relative pointer-events-auto">
+        <div className="relative z-10 flex-1 px-4 sm:px-8 pointer-events-none">
+          <div className="ml-auto w-28 h-40 sm:w-44 sm:h-60 md:w-60 md:h-40 rounded-2xl overflow-hidden bg-[#151836] border-2 border-white/25 shadow-2xl relative pointer-events-auto">
             {localStream && (!isVideoMuted || isScreenSharing) && localStream.getVideoTracks().length > 0 ? (
               <video
                 ref={localVideoRef}
@@ -268,8 +277,8 @@ export const CallModal: React.FC = () => {
                 ) : (
                   <Mic className="w-6 h-6 text-[#A78BFA] mb-1" />
                 )}
-                <span className="text-[11px] font-bold text-white">Вы</span>
-                <span className="text-[9px] text-[#8E96C2]">
+                <span className="text-[11px] sm:text-xs font-bold text-white">Вы</span>
+                <span className="text-[9px] sm:text-[11px] text-[#8E96C2]">
                   {isScreenSharing ? 'Экран' : isAudioMuted ? 'Микрофон выкл.' : 'На связи'}
                 </span>
               </div>
@@ -284,7 +293,7 @@ export const CallModal: React.FC = () => {
             4. Громкая связь (Динамик)
             5. Демонстрация экрана
             6. Завершить вызов */}
-        <div className="relative z-10 flex items-center justify-center gap-2.5 sm:gap-3.5 px-4 pb-7 pt-4 flex-wrap">
+        <div className="relative z-10 flex items-center justify-center gap-3 sm:gap-4 px-4 pb-6 sm:pb-8 pt-4 flex-wrap">
           <button
             type="button"
             onClick={toggleMuteAudio}

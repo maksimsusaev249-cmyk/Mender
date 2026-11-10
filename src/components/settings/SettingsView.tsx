@@ -106,9 +106,11 @@ export const SettingsView: React.FC = () => {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Password management
+  // Password management: по умолчанию текущий пароль (5 попыток), после 5 попыток — новый пароль + подтверждение
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [failedPasswordAttempts, setFailedPasswordAttempts] = useState(0);
   const [passwordSavedMessage, setPasswordSavedMessage] = useState<string | null>(null);
   const [passwordErrorMessage, setPasswordErrorMessage] = useState<string | null>(null);
 
@@ -211,19 +213,69 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setSavedSuccess(false), 2500);
   };
 
+  const isPasswordRecoveryMode = failedPasswordAttempts >= 5;
+
   const handleSavePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordSavedMessage(null);
     setPasswordErrorMessage(null);
+
+    const hasExistingPassword = Boolean(privateData?.passwordHash);
+
+    if (hasExistingPassword && !isPasswordRecoveryMode) {
+      if (!currentPassword) {
+        setPasswordErrorMessage('Введите текущий пароль');
+        return;
+      }
+      if (newPassword.length < 6) {
+        setPasswordErrorMessage('Новый пароль должен содержать минимум 6 символов');
+        return;
+      }
+      try {
+        await changeAccountPassword(newPassword, currentPassword, undefined, false);
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setFailedPasswordAttempts(0);
+        setPasswordSavedMessage('Пароль аккаунта успешно изменён!');
+        setTimeout(() => setPasswordSavedMessage(null), 4000);
+      } catch (err: any) {
+        if (err?.message === 'INVALID_CURRENT_PASSWORD') {
+          const nextAttempts = failedPasswordAttempts + 1;
+          setFailedPasswordAttempts(nextAttempts);
+          setCurrentPassword('');
+          if (nextAttempts >= 5) {
+            setPasswordErrorMessage(
+              'Использовано 5 из 5 попыток! Теперь введите сразу новый пароль и подтвердите его.'
+            );
+          } else {
+            setPasswordErrorMessage(
+              `Неверный текущий пароль! Осталось попыток: ${5 - nextAttempts} из 5.`
+            );
+          }
+        } else {
+          setPasswordErrorMessage(err?.message || 'Ошибка смены пароля');
+        }
+      }
+      return;
+    }
+
+    // Режим после 5 неудачных попыток (или если пароль ещё не был установлен): Новый пароль + Подтверждение
     if (newPassword.length < 6) {
       setPasswordErrorMessage('Новый пароль должен содержать минимум 6 символов');
       return;
     }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordErrorMessage('Новый пароль и подтверждение не совпадают!');
+      return;
+    }
     try {
-      await changeAccountPassword(newPassword, currentPassword);
+      await changeAccountPassword(newPassword, undefined, confirmNewPassword, true);
       setCurrentPassword('');
       setNewPassword('');
-      setPasswordSavedMessage('Основной пароль аккаунта успешно обновлён (PBKDF2-SHA256)!');
+      setConfirmNewPassword('');
+      setFailedPasswordAttempts(0);
+      setPasswordSavedMessage('Новый пароль успешно подтверждён и сохранён!');
       setTimeout(() => setPasswordSavedMessage(null), 4000);
     } catch (err: any) {
       setPasswordErrorMessage(err?.message || 'Ошибка смены пароля');
@@ -1329,34 +1381,76 @@ export const SettingsView: React.FC = () => {
 
             {/* [02] ACCOUNT PASSWORD */}
             <div className="bg-white border border-[#E1E3E6] rounded-xl p-5 shadow-xs">
-              <div className="text-xs font-semibold text-[#818C99] uppercase tracking-wider mb-2">
-                Пароль аккаунта
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="text-xs font-semibold text-[#818C99] uppercase tracking-wider">
+                  Пароль аккаунта
+                </div>
+                {Boolean(privateData?.passwordHash) && (
+                  <span
+                    className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${
+                      isPasswordRecoveryMode
+                        ? 'bg-[#FFF4E5] text-[#B76E00]'
+                        : 'bg-[#E5F1FF] text-[#0077FF]'
+                    }`}
+                  >
+                    {isPasswordRecoveryMode
+                      ? 'Сброс после 5 попыток'
+                      : `Попыток: ${5 - failedPasswordAttempts} из 5`}
+                  </span>
+                )}
               </div>
+
               <div className="font-semibold text-sm text-[#19191A] mb-1">
-                {privateData?.passwordHash ? 'Сменить пароль от аккаунта' : 'Установить пароль от аккаунта'}
+                {!privateData?.passwordHash
+                  ? 'Установить пароль от аккаунта'
+                  : isPasswordRecoveryMode
+                  ? 'Введите новый пароль и подтвердите'
+                  : 'Сменить пароль от аккаунта'}
               </div>
               <p className="text-xs text-[#818C99] mb-3">
-                Пароль используется при входе по почте (минимум 6 символов).
+                {!privateData?.passwordHash
+                  ? 'Придумайте новый пароль (минимум 6 символов) и подтвердите его.'
+                  : isPasswordRecoveryMode
+                  ? 'Вы не вспомнили текущий пароль за 5 попыток. Введите сразу новый пароль и подтвердите его ниже.'
+                  : 'По умолчанию введите текущий пароль. Если вы не вспомните его за 5 попыток — откроется ввод нового пароля с подтверждением.'}
               </p>
 
               <form onSubmit={handleSavePassword} className="space-y-3">
-                {Boolean(privateData?.passwordHash) && (
-                  <input
-                    type="password"
-                    value={currentPassword}
-                    onChange={e => setCurrentPassword(e.target.value)}
-                    placeholder="Введите текущий пароль *"
-                    className="v7-input"
-                  />
+                {Boolean(privateData?.passwordHash) && !isPasswordRecoveryMode ? (
+                  <>
+                    <input
+                      type="password"
+                      value={currentPassword}
+                      onChange={e => setCurrentPassword(e.target.value)}
+                      placeholder="Введите текущий пароль *"
+                      className="v7-input"
+                    />
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      placeholder="Введите новый пароль (минимум 6 символов)"
+                      className="v7-input"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={e => setNewPassword(e.target.value)}
+                      placeholder="Введите новый пароль (минимум 6 символов)"
+                      className="v7-input"
+                    />
+                    <input
+                      type="password"
+                      value={confirmNewPassword}
+                      onChange={e => setConfirmNewPassword(e.target.value)}
+                      placeholder="Подтвердите новый пароль"
+                      className="v7-input"
+                    />
+                  </>
                 )}
-
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={e => setNewPassword(e.target.value)}
-                  placeholder="Введите новый пароль (минимум 6 символов)"
-                  className="v7-input"
-                />
 
                 {passwordErrorMessage && (
                   <div className="text-xs font-semibold text-[#E64646] bg-[#FFEAEA] border border-[#FFCCCC] rounded-xl px-3 py-2">
@@ -1375,13 +1469,17 @@ export const SettingsView: React.FC = () => {
                     type="submit"
                     disabled={
                       newPassword.length < 6 ||
-                      (Boolean(privateData?.passwordHash) && !currentPassword)
+                      (Boolean(privateData?.passwordHash) && !isPasswordRecoveryMode
+                        ? !currentPassword
+                        : !confirmNewPassword)
                     }
                     className="v7-btn"
                   >
                     <Save className="w-4 h-4 shrink-0" />
                     <span>
-                      {privateData?.passwordHash ? 'Изменить пароль аккаунта' : 'Сохранить пароль'}
+                      {Boolean(privateData?.passwordHash) && !isPasswordRecoveryMode
+                        ? 'Изменить пароль аккаунта'
+                        : 'Подтвердить и сохранить новый пароль'}
                     </span>
                   </button>
                 </div>
