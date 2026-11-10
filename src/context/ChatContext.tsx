@@ -630,6 +630,29 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
+    if (firebaseUser?.uid) {
+      const secChatId = `chat_system_security_${firebaseUser.uid}`;
+      if (!merged.has(secChatId)) {
+        merged.set(secChatId, {
+          chatId: secChatId,
+          type: 'direct',
+          visibility: 'private',
+          name: 'Mender Безопасность',
+          description: 'Системные уведомления о безопасности, новых входах и защите аккаунта',
+          avatarUrl: 'https://images.unsplash.com/photo-1614064641938-3bbee52942c7?w=150&auto=format&fit=crop&q=80',
+          ownerId: firebaseUser.uid,
+          peerUserId: 'mender_security_bot',
+          membersCount: 2,
+          lastMessageText: 'Системные уведомления о входе и защите аккаунта',
+          lastMessageType: 'text',
+          lastMessageSenderId: 'mender_security_bot',
+          myRole: 'owner',
+          isPinned: true,
+          isMuted: false,
+        });
+      }
+    }
+
     return Array.from(merged.values()).sort((a, b) => {
       if (a.isPinned && !b.isPinned) return -1;
       if (!a.isPinned && b.isPinned) return 1;

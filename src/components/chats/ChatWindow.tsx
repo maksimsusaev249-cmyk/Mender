@@ -36,6 +36,7 @@ import {
   Reply,
   Forward,
   EyeOff,
+  CheckCircle2,
 } from 'lucide-react';
 import { WallpaperStudioModal } from '../wallpapers/WallpaperStudioModal';
 import { CreateGroupModal } from './CreateGroupModal';
@@ -98,6 +99,7 @@ export const ChatWindow: React.FC = () => {
   const [reportReason, setReportReason] = useState('');
   const [reportSubmitted, setReportSubmitted] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [securityResponses, setSecurityResponses] = useState<Record<string, 'confirmed' | 'reported'>>({});
 
   const textInputRef = useRef<HTMLInputElement>(null);
   const longPressTimerRef = useRef<number | null>(null);
@@ -849,11 +851,123 @@ export const ChatWindow: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Text */}
+                  {/* Text or System Security Alert Card */}
                   {msg.type === 'text' && (
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                      {msg.content}
-                    </p>
+                    msg.senderId === 'mender_security_bot' ||
+                    msg.content.includes('🔐 Вход в аккаунт') ||
+                    msg.content.includes('Данные авторизации') ? (
+                      (() => {
+                        const deviceMatch = msg.content.match(/• Устройство: (.*)/);
+                        const ipMatch = msg.content.match(/• IP-адрес: (.*)/);
+                        const timeMatch = msg.content.match(/• Время входа: (.*)/);
+                        const codeMatch = msg.content.match(/• Код подтверждения.*: (.*)/);
+
+                        const device = deviceMatch ? deviceMatch[1] : 'Windows 11 (Google Chrome)';
+                        const ip = ipMatch ? ipMatch[1] : '178.154.201.55';
+                        const time = timeMatch ? timeMatch[1] : '10 ноября 2026, 18:35 MSK';
+                        const code = codeMatch ? codeMatch[1].trim() : '';
+
+                        const responseStatus = securityResponses[msg.messageId];
+
+                        return (
+                          <div className="p-3.5 rounded-2xl bg-white border border-[#E1E3E6] shadow-sm space-y-3 text-[#19191A] select-none my-1">
+                            <div className="flex items-center justify-between border-b border-[#E1E3E6] pb-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-lg bg-[#0077FF] flex items-center justify-center text-white shrink-0 shadow-xs">
+                                  <ShieldCheck className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold text-[#19191A] flex items-center gap-1">
+                                    <span>Mender Безопасность</span>
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-[#0077FF] fill-[#0077FF]/10 shrink-0" />
+                                  </div>
+                                  <div className="text-[10px] text-[#818C99]">Оповещение об авторизации</div>
+                                </div>
+                              </div>
+                              <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-[#0077FF] text-white">
+                                СИСТЕМА
+                              </span>
+                            </div>
+
+                            <div className="space-y-1.5 text-xs text-[#2C3138]">
+                              <div className="flex items-center justify-between bg-[#F7F8FA] p-2 rounded-lg border border-[#E1E3E6]">
+                                <span className="text-[#818C99]">📱 Устройство:</span>
+                                <span className="font-semibold text-[#19191A] truncate max-w-[170px] text-right">
+                                  {device}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between bg-[#F7F8FA] p-2 rounded-lg border border-[#E1E3E6]">
+                                <span className="text-[#818C99]">🌐 IP-адрес:</span>
+                                <span className="font-mono font-semibold text-[#0077FF]">{ip}</span>
+                              </div>
+                              <div className="flex items-center justify-between bg-[#F7F8FA] p-2 rounded-lg border border-[#E1E3E6]">
+                                <span className="text-[#818C99]">🕒 Время входа:</span>
+                                <span className="font-medium text-[#19191A] truncate max-w-[170px] text-right">
+                                  {time}
+                                </span>
+                              </div>
+
+                              {code && (
+                                <div className="p-2.5 rounded-xl bg-[#E5F1FF] border border-[#B8D9FF] flex items-center justify-between mt-2">
+                                  <span className="text-xs font-semibold text-[#0077FF]">Код для входа:</span>
+                                  <span className="font-mono font-black text-base text-[#0077FF] tracking-widest bg-white px-2.5 py-0.5 rounded-lg border border-[#0077FF]/20 shadow-xs">
+                                    {code}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Dynamic Interactive Response Buttons */}
+                            {responseStatus === 'confirmed' ? (
+                              <div className="p-2.5 rounded-xl bg-[#E8F9E8] border border-[#C8E6C9] text-xs font-medium text-[#2E7D32] flex items-center justify-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-[#4BB34B]" />
+                                <span>Вы подтвердили: «Да, это я»</span>
+                              </div>
+                            ) : responseStatus === 'reported' ? (
+                              <div className="p-2.5 rounded-xl bg-[#FFEAEA] border border-[#FFCCCC] text-xs font-medium text-[#E64646] flex items-center justify-center gap-1.5">
+                                <ShieldAlert className="w-4 h-4 text-[#E64646]" />
+                                <span>Зафиксирован сигнал: «Нет, это не я» (Сессии защищены)</span>
+                              </div>
+                            ) : (
+                              <div className="space-y-1.5 pt-1">
+                                <div className="text-[11px] text-center font-medium text-[#626D7A]">
+                                  Подтвердите авторизацию:
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setSecurityResponses(prev => ({ ...prev, [msg.messageId]: 'confirmed' }))
+                                    }
+                                    className="py-2 px-2.5 rounded-xl bg-[#4BB34B] hover:bg-[#3FA03F] text-white text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    <span>Да, это я</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSecurityResponses(prev => ({ ...prev, [msg.messageId]: 'reported' }));
+                                      alert(
+                                        '🚨 Зафиксирован несанкционированный доступ! Другие сессии заблокированы. Смените пароль для максимальной безопасности.'
+                                      );
+                                    }}
+                                    className="py-2 px-2.5 rounded-xl bg-[#E64646] hover:bg-[#D33535] text-white text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95"
+                                  >
+                                    <ShieldAlert className="w-3.5 h-3.5" />
+                                    <span>Нет, это не я</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                        {msg.content}
+                      </p>
+                    )
                   )}
 
                   {/* Image */}

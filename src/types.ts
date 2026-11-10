@@ -244,3 +244,14 @@ export interface ProfileFolder {
   updatedAt?: any;
 }
 
+export interface UserSessionDoc {
+  sessionId: string;
+  userId: string;
+  device: string;
+  ip: string;
+  isCurrent?: boolean;
+  status: 'active' | 'terminated';
+  lastActiveAt?: any;
+  createdAt?: any;
+}
+

@@ -414,6 +414,36 @@
         "status",
         "createdAt"
       ]
+    },
+    "UserSession": {
+      "title": "UserSession",
+      "description": "Active device session record for a user.",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "device": { "type": "string", "maxLength": 200 },
+        "ip": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["active", "terminated"] },
+        "lastActiveAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["sessionId", "userId", "device", "ip", "status"]
+    },
+    "ProfileFolder": {
+      "title": "ProfileFolder",
+      "description": "User profile folder for grouping posts.",
+      "type": "object",
+      "properties": {
+        "folderId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "postIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["folderId", "userId", "name", "postIds"]
     }
   },
   "firestore": {
@@ -444,6 +474,14 @@
     "/users/{userId}/custom_wallpapers/{wallpaperId}": {
       "schema": "CustomWallpaper",
       "description": "Custom uploaded wallpapers owned by {userId}."
+    },
+    "/users/{userId}/profile_folders/{folderId}": {
+      "schema": "ProfileFolder",
+      "description": "User-created folders for organizing posts on their profile."
+    },
+    "/users/{userId}/activeSessions/{sessionId}": {
+      "schema": "UserSession",
+      "description": "Active device login sessions for {userId}."
     },
     "/chats/{chatId}": {
       "schema": "Chat",
@@ -483,3 +521,4 @@
     }
   }
 }
+

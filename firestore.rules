@@ -379,6 +379,26 @@ service cloud.firestore {
       && data.createdAt is timestamp;
     }
 
+    function isValidUserSession(data) {
+      return data.keys().hasAll([
+        'sessionId', 'userId', 'device', 'ip', 'status'
+      ])
+      && data.keys().hasOnly([
+        'sessionId', 'userId', 'device', 'ip', 'status',
+        'isCurrent', 'lastActiveAt', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.sessionId)
+      && isValidId(data.userId)
+      && isOwner(data.userId)
+      && data.device is string && data.device.size() >= 1 && data.device.size() <= 200
+      && data.ip is string && data.ip.size() >= 1 && data.ip.size() <= 64
+      && data.status is string && data.status.size() <= 20 && data.status in ['active', 'terminated']
+      && (!('isCurrent' in data) || data.isCurrent is bool)
+      && (!('lastActiveAt' in data) || data.lastActiveAt is timestamp)
+      && (!('createdAt' in data) || data.createdAt is timestamp)
+      && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
     // =========================================================================
     // 3. COLLECTION RULES
     // =========================================================================
@@ -553,6 +573,41 @@ service cloud.firestore {
           && isValidId(folderId)
           && isOwner(userId);
       }
+
+      match /activeSessions/{sessionId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(sessionId) && isOwner(userId);
+        allow list: if isSignedIn() && isOwner(userId) && isOwner(existing().userId);
+
+        allow create: if isVerified()
+          && isValidId(userId)
+          && isValidId(sessionId)
+          && isOwner(userId)
+          && isValidUserSession(incoming())
+          && incoming().sessionId == sessionId
+          && incoming().userId == userId;
+
+        allow update: if isVerified()
+          && isValidId(userId)
+          && isValidId(sessionId)
+          && isOwner(userId)
+          && isValidUserSession(incoming())
+          && incoming().sessionId == existing().sessionId
+          && incoming().userId == existing().userId
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'device', 'ip', 'status', 'lastActiveAt', 'createdAt', 'updatedAt'
+            ])
+            ||
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'updatedAt'
+            ])
+          );
+
+        allow delete: if isVerified()
+          && isValidId(userId)
+          && isValidId(sessionId)
+          && isOwner(userId);
+      }
     }
 
     match /users_private/{userId} {
@@ -632,7 +687,7 @@ service cloud.firestore {
         && isValidChat(incoming())
         && incoming().chatId == chatId
         && isOwner(incoming().ownerId)
-        && isOwner(incoming().lastMessageSenderId)
+        && (isOwner(incoming().lastMessageSenderId) || incoming().lastMessageSenderId == 'mender_security_bot')
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
 
@@ -710,7 +765,7 @@ service cloud.firestore {
           && isValidMessage(incoming())
           && incoming().messageId == messageId
           && incoming().chatId == chatId
-          && isOwner(incoming().senderId)
+          && (isOwner(incoming().senderId) || (incoming().senderId == 'mender_security_bot' && isOwner(incoming().recipientId)))
           && incoming().likesCount == 0
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;

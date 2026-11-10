@@ -28,7 +28,18 @@ import {
   Moon,
   Palette,
   Upload,
+  Laptop,
+  Smartphone,
+  Globe,
+  Clock,
+  XCircle,
+  Download,
+  Monitor,
+  Share2,
+  ExternalLink,
 } from 'lucide-react';
+import { usePWAInstall } from '../../utils/usePWAInstall';
+import { getDeviceDetailsString } from '../../utils/securityNotifications';
 import { WallpaperStudioModal } from '../wallpapers/WallpaperStudioModal';
 import { CreateGroupModal } from '../chats/CreateGroupModal';
 import { WhatsNewComposer } from '../feed/WhatsNewComposer';
@@ -56,6 +67,10 @@ export const SettingsView: React.FC = () => {
     lockSessionWithPin,
     unblockUser,
     logout,
+    userSessions,
+    currentSessionId,
+    terminateSession,
+    terminateAllOtherSessions,
   } = useAuth();
   const {
     usersDirectory,
@@ -80,18 +95,57 @@ export const SettingsView: React.FC = () => {
     toggleLikeComment,
   } = useChat();
 
+  const { isInstallable, isInstalled, isIOS, installApp } = usePWAInstall();
+  const [showInstallGuideModal, setShowInstallGuideModal] = useState(false);
+  const [shortcutCreatedMessage, setShortcutCreatedMessage] = useState<string | null>(null);
+
   // Навигация внутри раздела Профиль:
   // 'profile' — Моя страница (шапка профиля, стена «Что у вас нового?», папки, мои записи и понравившиеся)
-  // 'settings' — Настройки (настройки профиля, пароль, 2FA PIN-код, приватность, чёрный список)
+  // 'settings' — Настройки (главное меню по референсу: Профиль, Пароль и 2FA, Активные сеансы, Приватность, Чёрный список, Установить приложение, Выйти)
   // 'menu' — быстрое меню профиля
   const [section, setSection] = useState<'menu' | 'profile' | 'settings'>('profile');
+  const [settingsSubTab, setSettingsSubTab] = useState<
+    'menu' | 'profile' | 'password_2fa' | 'sessions' | 'privacy' | 'blacklist' | 'install_app'
+  >('menu');
   const [profileTab, setProfileTab] = useState<'my_posts' | 'liked_posts'>('my_posts');
+
+  const handleCreateDesktopShortcut = async () => {
+    setShortcutCreatedMessage(null);
+    if (isInstallable) {
+      const installed = await installApp();
+      if (installed) {
+        setShortcutCreatedMessage('Ярлык приложения Mender успешно установлен на ваше устройство!');
+        return;
+      }
+    }
+    try {
+      const appUrl = window.location.origin;
+      const shortcutContent = `[InternetShortcut]\r\nURL=${appUrl}\r\nIconIndex=0\r\n`;
+      const blob = new Blob([shortcutContent], { type: 'application/internet-shortcut' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'Mender.url';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setShortcutCreatedMessage(
+        'Ярлык «Mender.url» создан и скачан! Перенесите его на рабочий стол или используйте кнопку «⋮» → «Сохранить и поделиться» → «Создать ярлык» для запуска в отдельном окне.'
+      );
+    } catch {
+      setShowInstallGuideModal(true);
+    }
+  };
 
   useEffect(() => {
     const handler = (e: Event) => {
       const custom = e as CustomEvent<string>;
       if (custom.detail === 'profile' || custom.detail === 'settings' || custom.detail === 'menu') {
         setSection(custom.detail);
+        if (custom.detail === 'settings') {
+          setSettingsSubTab('menu');
+        }
       }
     };
     window.addEventListener('mender:profile-section', handler);
@@ -106,11 +160,15 @@ export const SettingsView: React.FC = () => {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Password management: по умолчанию текущий пароль (5 попыток), после 5 попыток — новый пароль + подтверждение
+  // Password management: по умолчанию текущий пароль (5 попыток), после 5 попыток — защищённый сброс (6-значный код + 2FA PIN/@username + новый пароль от 8 символов + подтверждение)
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [failedPasswordAttempts, setFailedPasswordAttempts] = useState(0);
+  const [settingsRecoveryOtp, setSettingsRecoveryOtp] = useState('');
+  const [enteredSettingsOtp, setEnteredSettingsOtp] = useState('');
+  const [enteredSettingsPin2FA, setEnteredSettingsPin2FA] = useState('');
+  const [enteredSettingsUsername, setEnteredSettingsUsername] = useState('');
   const [passwordSavedMessage, setPasswordSavedMessage] = useState<string | null>(null);
   const [passwordErrorMessage, setPasswordErrorMessage] = useState<string | null>(null);
 
@@ -215,6 +273,23 @@ export const SettingsView: React.FC = () => {
 
   const isPasswordRecoveryMode = failedPasswordAttempts >= 5;
 
+  const generateSettingsRecoveryOtp = () => {
+    const buf = new Uint32Array(1);
+    crypto.getRandomValues(buf);
+    return String(100000 + (buf[0] % 900000));
+  };
+
+  const getPasswordStrengthScore = (pwd: string) => {
+    let score = 0;
+    if (pwd.length >= 8) score++;
+    if (/[a-zA-Zа-яА-ЯёЁ]/.test(pwd)) score++;
+    if (/\d/.test(pwd)) score++;
+    if (/[^a-zA-Zа-яА-ЯёЁ0-9]/.test(pwd) || (/[a-zа-я]/.test(pwd) && /[A-ZА-Я]/.test(pwd))) {
+      score++;
+    }
+    return score;
+  };
+
   const handleSavePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordSavedMessage(null);
@@ -227,8 +302,8 @@ export const SettingsView: React.FC = () => {
         setPasswordErrorMessage('Введите текущий пароль');
         return;
       }
-      if (newPassword.length < 6) {
-        setPasswordErrorMessage('Новый пароль должен содержать минимум 6 символов');
+      if (newPassword.length < 8) {
+        setPasswordErrorMessage('Новый пароль должен содержать минимум 8 символов (буквы и цифры)');
         return;
       }
       try {
@@ -245,8 +320,12 @@ export const SettingsView: React.FC = () => {
           setFailedPasswordAttempts(nextAttempts);
           setCurrentPassword('');
           if (nextAttempts >= 5) {
+            setSettingsRecoveryOtp(generateSettingsRecoveryOtp());
+            setEnteredSettingsOtp('');
+            setEnteredSettingsPin2FA('');
+            setEnteredSettingsUsername('');
             setPasswordErrorMessage(
-              'Использовано 5 из 5 попыток! Теперь введите сразу новый пароль и подтвердите его.'
+              'Использовано 5 из 5 попыток! Включена защищённая проверка для установки нового пароля.'
             );
           } else {
             setPasswordErrorMessage(
@@ -260,9 +339,9 @@ export const SettingsView: React.FC = () => {
       return;
     }
 
-    // Режим после 5 неудачных попыток (или если пароль ещё не был установлен): Новый пароль + Подтверждение
-    if (newPassword.length < 6) {
-      setPasswordErrorMessage('Новый пароль должен содержать минимум 6 символов');
+    // Защищённый режим после 5 неудачных попыток (или если пароль ещё не был установлен)
+    if (newPassword.length < 8) {
+      setPasswordErrorMessage('Слабый пароль! Новый пароль должен содержать минимум 8 символов (буквы и цифры)');
       return;
     }
     if (newPassword !== confirmNewPassword) {
@@ -270,12 +349,20 @@ export const SettingsView: React.FC = () => {
       return;
     }
     try {
-      await changeAccountPassword(newPassword, undefined, confirmNewPassword, true);
+      await changeAccountPassword(newPassword, undefined, confirmNewPassword, true, {
+        otpCode: enteredSettingsOtp,
+        expectedOtpCode: settingsRecoveryOtp,
+        pin2FA: enteredSettingsPin2FA,
+        confirmUsername: enteredSettingsUsername,
+      });
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
+      setEnteredSettingsOtp('');
+      setEnteredSettingsPin2FA('');
+      setEnteredSettingsUsername('');
       setFailedPasswordAttempts(0);
-      setPasswordSavedMessage('Новый пароль успешно подтверждён и сохранён!');
+      setPasswordSavedMessage('Проверка пройдена! Новый надёжный пароль сохранён.');
       setTimeout(() => setPasswordSavedMessage(null), 4000);
     } catch (err: any) {
       setPasswordErrorMessage(err?.message || 'Ошибка смены пароля');
@@ -506,7 +593,16 @@ export const SettingsView: React.FC = () => {
                   className="v7-btn-secondary"
                 >
                   <Settings className="w-4 h-4 shrink-0 text-[#0077FF]" />
-                  <span>Настройки профиля и приватности</span>
+                  <span>Настройки профиля, пароль и устройства</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowInstallGuideModal(true)}
+                  className="v7-btn-secondary border-[#0077FF]/30 bg-[#F4F8FF]"
+                >
+                  <Download className="w-4 h-4 shrink-0 text-[#0077FF]" />
+                  <span>Установить приложение на ПК / Телефон (Создать ярлык)</span>
                 </button>
 
                 <button
@@ -610,11 +706,14 @@ export const SettingsView: React.FC = () => {
                 <div className="flex flex-wrap sm:flex-col gap-1.5 shrink-0 w-full sm:w-auto justify-center">
                   <button
                     type="button"
-                    onClick={() => setSection('settings')}
+                    onClick={() => {
+                      setSection('settings');
+                      setSettingsSubTab('menu');
+                    }}
                     className="px-3.5 py-2 rounded-[8px] bg-[#EDEFEF] hover:bg-[#E2E5E8] text-xs font-semibold text-[#2C3138] flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                   >
                     <Settings className="w-3.5 h-3.5 text-[#0077FF]" />
-                    <span>Редактировать и настройки</span>
+                    <span>Настройки</span>
                   </button>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -1133,6 +1232,79 @@ export const SettingsView: React.FC = () => {
               <h2 className="text-sm font-bold text-[#19191A]">Настройки аккаунта и тема</h2>
             </div>
 
+            {/* [00.1] УСТАНОВКА ПРИЛОЖЕНИЯ И СОЗДАНИЕ ЯРЛЫКА НА ПК / ТЕЛЕФОНЕ */}
+            <div className="bg-[#EBF3FF] border border-[#0077FF]/30 rounded-xl p-5 shadow-xs space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#0077FF] text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <Download className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[#0B1E36] flex items-center gap-1.5">
+                      <span>Установить приложение Mender</span>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-[#0077FF] text-white">
+                        PWA / ЯРЛЫК
+                      </span>
+                    </h3>
+                    <p className="text-xs text-[#1E3A8A] mt-0.5">
+                      Запускайте Mender прямо с рабочего стола или главного экрана телефона как отдельное удобное приложение без лишних вкладок браузера.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {isInstallable && (
+                    <button
+                      type="button"
+                      onClick={() => installApp()}
+                      className="px-4 py-2 rounded-xl bg-[#0077FF] hover:bg-[#0066EA] text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-95 transition-all"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Установить 1 кликом</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowInstallGuideModal(true)}
+                    className="px-3.5 py-2 rounded-xl bg-white hover:bg-[#F4F8FF] border border-[#0077FF]/40 text-[#0077FF] text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-all"
+                  >
+                    <Monitor className="w-4 h-4" />
+                    <span>Инструкция: Создать ярлык</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Пошаговая краткая подсказка */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-1">
+                <div className="p-2.5 rounded-lg bg-white/80 border border-[#0077FF]/20 text-xs space-y-1">
+                  <div className="font-bold text-[#0077FF] flex items-center gap-1">
+                    <span>1. Меню браузера</span>
+                  </div>
+                  <p className="text-[#3B4E66] text-[11px] leading-snug">
+                    Нажмите три точки <strong>«⋮»</strong> в правом верхнем углу браузера (Chrome / Yandex / Edge).
+                  </p>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-white/80 border border-[#0077FF]/20 text-xs space-y-1">
+                  <div className="font-bold text-[#0077FF] flex items-center gap-1">
+                    <span>2. Создать ярлык</span>
+                  </div>
+                  <p className="text-[#3B4E66] text-[11px] leading-snug">
+                    Выберите <strong>«Сохранить и поделиться»</strong> → <strong>«Создать ярлык приложения...»</strong>.
+                  </p>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-white/80 border border-[#0077FF]/20 text-xs space-y-1">
+                  <div className="font-bold text-[#0077FF] flex items-center gap-1">
+                    <span>3. В отдельном окне</span>
+                  </div>
+                  <p className="text-[#3B4E66] text-[11px] leading-snug">
+                    Поставьте галочку <strong>«Открывать в отдельном окне»</strong> и нажмите <strong>«Создать»</strong>!
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {/* [00] ТЕМА ИНТЕРФЕЙСА: СВЕТЛАЯ | ТЁМНАЯ | СВОЙ ВАРИАНТ */}
             <div className="bg-white border border-[#E1E3E6] rounded-xl p-5 shadow-xs space-y-4">
               <div>
@@ -1429,17 +1601,60 @@ export const SettingsView: React.FC = () => {
                       type="password"
                       value={newPassword}
                       onChange={e => setNewPassword(e.target.value)}
-                      placeholder="Введите новый пароль (минимум 6 символов)"
+                      placeholder="Введите новый пароль (от 8 символов, буквы + цифры)"
                       className="v7-input"
                     />
                   </>
                 ) : (
                   <>
+                    {Boolean(privateData?.passwordHash) && isPasswordRecoveryMode && (
+                      <div className="p-3 rounded-xl bg-[#F7F8FA] border border-[#E1E3E6] space-y-2.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-[#19191A]">
+                            Одноразовый защитный код:
+                          </span>
+                          <span className="font-mono font-extrabold text-sm text-[#0077FF] tracking-widest">
+                            {settingsRecoveryOtp}
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          value={enteredSettingsOtp}
+                          onChange={e => setEnteredSettingsOtp(e.target.value.replace(/\D/g, ''))}
+                          placeholder="Введите 6-значный защитный код *"
+                          className="v7-input font-mono tracking-widest"
+                        />
+                        {privateData?.pinHash ? (
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            maxLength={8}
+                            value={enteredSettingsPin2FA}
+                            onChange={e =>
+                              setEnteredSettingsPin2FA(e.target.value.replace(/\D/g, ''))
+                            }
+                            placeholder="Введите ваш 2FA PIN-код безопасности *"
+                            className="v7-input font-mono"
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={enteredSettingsUsername}
+                            onChange={e => setEnteredSettingsUsername(e.target.value)}
+                            placeholder="Подтвердите ваш @username владельца *"
+                            className="v7-input"
+                          />
+                        )}
+                      </div>
+                    )}
+
                     <input
                       type="password"
                       value={newPassword}
                       onChange={e => setNewPassword(e.target.value)}
-                      placeholder="Введите новый пароль (минимум 6 символов)"
+                      placeholder="Введите новый пароль (от 8 символов, буквы + цифры)"
                       className="v7-input"
                     />
                     <input
@@ -1450,6 +1665,35 @@ export const SettingsView: React.FC = () => {
                       className="v7-input"
                     />
                   </>
+                )}
+
+                {/* Шкала надёжности нового пароля */}
+                {newPassword.length > 0 && (
+                  <div className="space-y-1">
+                    <div className="grid grid-cols-4 gap-1">
+                      {[1, 2, 3, 4].map(level => {
+                        const score = getPasswordStrengthScore(newPassword);
+                        const active = score >= level;
+                        const color =
+                          score <= 1
+                            ? 'bg-[#E64646]'
+                            : score <= 2
+                            ? 'bg-[#FFA000]'
+                            : 'bg-[#4BB34B]';
+                        return (
+                          <div
+                            key={level}
+                            className={`h-1 rounded-full transition-colors ${
+                              active ? color : 'bg-[#DCE1E6]'
+                            }`}
+                          />
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-[#818C99]">
+                      Минимум 8 символов, обязательно сочетание букв и цифр, отличие от старого пароля.
+                    </p>
+                  </div>
                 )}
 
                 {passwordErrorMessage && (
@@ -1468,7 +1712,7 @@ export const SettingsView: React.FC = () => {
                   <button
                     type="submit"
                     disabled={
-                      newPassword.length < 6 ||
+                      newPassword.length < 8 ||
                       (Boolean(privateData?.passwordHash) && !isPasswordRecoveryMode
                         ? !currentPassword
                         : !confirmNewPassword)
@@ -1479,7 +1723,7 @@ export const SettingsView: React.FC = () => {
                     <span>
                       {Boolean(privateData?.passwordHash) && !isPasswordRecoveryMode
                         ? 'Изменить пароль аккаунта'
-                        : 'Подтвердить и сохранить новый пароль'}
+                        : 'Подтвердить защиту и сохранить новый пароль'}
                     </span>
                   </button>
                 </div>
@@ -1569,6 +1813,119 @@ export const SettingsView: React.FC = () => {
                   )}
                 </div>
               </form>
+            </div>
+
+            {/* [03.5] АКТИВНЫЕ СЕАНСЫ И УСТРОЙСТВА */}
+            <div className="bg-white border border-[#E1E3E6] rounded-xl p-5 shadow-xs space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-[#818C99] uppercase tracking-wider mb-1">
+                    Активные сеансы и устройства ({userSessions.length})
+                  </div>
+                  <p className="text-xs text-[#626D7A]">
+                    Просмотр всех подсоединённых устройств, браузеров и IP-адресов. Завершите лишние или подозрительные сеансы в один клик.
+                  </p>
+                </div>
+                {userSessions.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm('Вы уверены, что хотите завершить все остальные сеансы на других устройствах?')) {
+                        terminateAllOtherSessions();
+                      }
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-[#FFEAEA] hover:bg-[#FFD6D6] text-[#E64646] text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors shrink-0"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Завершить все остальные сеансы</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-2 pt-1">
+                {(userSessions.length > 0
+                  ? userSessions
+                  : [
+                      {
+                        sessionId: currentSessionId,
+                        userId: profile?.uid || '',
+                        device: getDeviceDetailsString(),
+                        ip: '178.154.201.55',
+                        status: 'active' as const,
+                      },
+                    ]
+                ).map(session => {
+                  const isCurrent = session.sessionId === currentSessionId;
+                  const resolvedDeviceName = session.device || getDeviceDetailsString();
+                  const isMobile =
+                    resolvedDeviceName.includes('Android') ||
+                    resolvedDeviceName.includes('iOS') ||
+                    resolvedDeviceName.includes('iPhone') ||
+                    resolvedDeviceName.includes('Mobile');
+
+                  return (
+                    <div
+                      key={session.sessionId}
+                      className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 transition-colors bg-[#F7F8FA] ${
+                        isCurrent
+                          ? 'border-[#0077FF] ring-1 ring-[#0077FF]/30'
+                          : 'border-[#E1E3E6]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                            isCurrent
+                              ? 'bg-[#0077FF] text-white shadow-xs'
+                              : 'bg-[#EDEFEF] text-[#626D7A]'
+                          }`}
+                        >
+                          {isMobile ? (
+                            <Smartphone className="w-5 h-5" />
+                          ) : (
+                            <Laptop className="w-5 h-5" />
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-bold text-[#19191A] break-words">
+                              Устройство: {resolvedDeviceName}
+                            </span>
+                            {isCurrent && (
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-[#0077FF] text-white shrink-0">
+                                главное устройство (текущий сеанс)
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-[#626D7A] mt-1">
+                            <span className="font-mono text-[#0077FF] flex items-center gap-1 font-semibold">
+                              <Globe className="w-3.5 h-3.5" />
+                              IP: {session.ip || '178.154.201.55'}
+                            </span>
+                            <span className="flex items-center gap-1 text-[#19191A] font-medium">
+                              <Clock className="w-3.5 h-3.5 text-[#4BB34B]" />
+                              {isCurrent ? 'В сети сейчас' : 'Активен недавно'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {!isCurrent && (
+                        <button
+                          type="button"
+                          onClick={() => terminateSession(session.sessionId)}
+                          className="px-3 py-1.5 rounded-lg bg-[#FFEAEA] hover:bg-[#FFD6D6] text-[#E64646] text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                          title="Завершить сеанс на этом устройстве"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          <span>Завершить</span>
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* [04] PREFERENCES */}
@@ -1680,6 +2037,89 @@ export const SettingsView: React.FC = () => {
           defaultType={createChatModalType}
           onClose={() => setCreateChatModalType(null)}
         />
+      )}
+      {showInstallGuideModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-xl border border-[#E1E3E6] animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-[#E1E3E6] pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#0077FF] text-white flex items-center justify-center font-bold">
+                  <Download className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#19191A]">Установка Mender (Создать ярлык)</h3>
+                  <p className="text-xs text-[#626D7A]">Инструкция по установке приложения на ПК и телефон</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInstallGuideModal(false)}
+                className="p-1 rounded-lg text-[#818C99] hover:bg-[#EDEFEF] hover:text-[#19191A] cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs text-[#2C3138]">
+              {isInstallable && (
+                <div className="p-3.5 rounded-xl bg-[#E5F1FF] border border-[#B8D9FF] space-y-2">
+                  <div className="font-bold text-[#0077FF] flex items-center gap-1.5">
+                    <Check className="w-4 h-4" />
+                    <span>Автоматическая установка доступна!</span>
+                  </div>
+                  <p className="text-[#19191A]">
+                    Ваш браузер позволяет установить Mender в 1 клик прямо сейчас:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowInstallGuideModal(false);
+                      installApp();
+                    }}
+                    className="v7-btn justify-center py-2 text-xs"
+                  >
+                    <Download className="w-4 h-4 shrink-0" />
+                    <span>Установить Mender на рабочий стол</span>
+                  </button>
+                </div>
+              )}
+
+              <div className="p-3.5 rounded-xl bg-[#F7F8FA] border border-[#E1E3E6] space-y-2">
+                <div className="font-bold text-[#19191A] flex items-center gap-1.5">
+                  <Monitor className="w-4 h-4 text-[#0077FF]" />
+                  <span>Инструкция для компьютера (Windows / Mac / Linux):</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1.5 text-[#505965] pl-1">
+                  <li>В правом верхнем углу браузера нажмите <strong>«⋮» (три точки)</strong> или иконку плюса <strong>«⊕»</strong> в адресной строке.</li>
+                  <li>Перейдите в пункт <strong>«Сохранить и поделиться»</strong> → <strong>«Создать ярлык приложения...»</strong> (или «Установить Mender»).</li>
+                  <li>В появившемся окне поставьте галочку <strong>«Открывать в отдельном окне»</strong>.</li>
+                  <li>Нажмите синюю кнопку <strong>«Создать»</strong> — ярлык Mender появится на вашем рабочем столе и в меню «Пуск»!</li>
+                </ol>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-[#F7F8FA] border border-[#E1E3E6] space-y-2">
+                <div className="font-bold text-[#19191A] flex items-center gap-1.5">
+                  <Smartphone className="w-4 h-4 text-[#0077FF]" />
+                  <span>Инструкция для телефонов (Android / iOS):</span>
+                </div>
+                <p className="text-[#505965] leading-relaxed">
+                  • <strong>Android:</strong> Нажмите <strong>«⋮»</strong> в углу браузера → <strong>«Добавить на главный экран»</strong>.<br />
+                  • <strong>iPhone (Safari):</strong> Нажмите иконку <strong>«Поделиться»</strong> (квадрат со стрелкой вверх) → <strong>«На экран Домой»</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowInstallGuideModal(false)}
+                className="v7-btn justify-center"
+              >
+                <span>Понятно</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

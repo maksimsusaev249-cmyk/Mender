@@ -18,6 +18,7 @@ import {
   Sun,
   Moon,
   Palette,
+  KeyRound,
 } from 'lucide-react';
 
 export const AuthScreen: React.FC = () => {
@@ -37,6 +38,7 @@ export const AuthScreen: React.FC = () => {
     authError,
     clearAuthError,
     loginWithEmailAccount,
+    requestPasswordRecoveryChallenge,
     resetForgottenPassword,
     registerWithEmailAccount,
     loginWithGoogle,
@@ -57,6 +59,17 @@ export const AuthScreen: React.FC = () => {
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [recoveryChallenge, setRecoveryChallenge] = useState<{
+    uid: string;
+    maskedHint: string;
+    requires2FaPin: boolean;
+    requiresEmailOrUsernameCheck: string;
+    otpCode: string;
+    expiresAt: number;
+  } | null>(null);
+  const [recoveryOtpInput, setRecoveryOtpInput] = useState('');
+  const [recoveryOwnerConfirmInput, setRecoveryOwnerConfirmInput] = useState('');
+  const [recoveryPin2FAInput, setRecoveryPin2FAInput] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [resetConfirmPassword, setResetConfirmPassword] = useState('');
   const [emailNameInput, setEmailNameInput] = useState('');
@@ -120,8 +133,8 @@ export const AuthScreen: React.FC = () => {
     };
 
     return (
-      <div className="min-h-screen bg-[#EDEEF0] flex items-center justify-center p-4 text-[#19191A] select-none">
-        <div className="w-full max-w-md bg-white rounded-2xl p-6 md:p-7 shadow-sm border border-[#E1E3E6]">
+      <div className="h-[100dvh] overflow-y-auto bg-[#EDEEF0] flex flex-col items-center py-6 px-4 text-[#19191A] select-none">
+        <div className="w-full max-w-md my-auto bg-white rounded-2xl p-6 md:p-7 shadow-sm border border-[#E1E3E6]">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0077FF]">
               <ShieldCheck className="w-4 h-4 text-[#4BB34B]" />
@@ -287,8 +300,8 @@ export const AuthScreen: React.FC = () => {
     };
 
     return (
-      <div className="min-h-screen bg-[#EDEEF0] flex items-center justify-center p-4 text-[#19191A]">
-        <div className="w-full max-w-lg bg-white rounded-2xl p-7 shadow-sm border border-[#E1E3E6]">
+      <div className="h-[100dvh] overflow-y-auto bg-[#EDEEF0] flex flex-col items-center py-6 px-4 text-[#19191A]">
+        <div className="w-full max-w-lg my-auto bg-white rounded-2xl p-7 shadow-sm border border-[#E1E3E6]">
           <div className="text-xs font-semibold text-[#0077FF] mb-1">Настройка страницы</div>
           <h1 className="text-xl font-bold text-[#19191A] mb-1">Создание профиля Mender</h1>
           <p className="text-xs text-[#626D7A] mb-5">
@@ -415,7 +428,39 @@ export const AuthScreen: React.FC = () => {
     );
   }
 
-  // Case 3: Unauthenticated user — Вход по @юзеру / имени / почте и Регистрация
+  // Case 3: Unauthenticated user — Вход по @юзеру / имени / почте и Защищённый сброс пароля
+  const handleStartRecoveryChallenge = async () => {
+    resetMessages();
+    if (!loginIdentifier.trim()) {
+      setLocalError('Сначала введите ваш @юзернейм, имя или почту');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const challenge = await requestPasswordRecoveryChallenge(loginIdentifier.trim());
+      setRecoveryChallenge(challenge);
+      setIsResettingPassword(true);
+      setRecoveryOtpInput('');
+      setRecoveryOwnerConfirmInput('');
+      setRecoveryPin2FAInput('');
+    } catch (err: any) {
+      setLocalError(err?.message || 'Не удалось запросить защитный код');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getPasswordStrengthScore = (pwd: string) => {
+    let score = 0;
+    if (pwd.length >= 8) score++;
+    if (/[a-zA-Zа-яА-ЯёЁ]/.test(pwd)) score++;
+    if (/\d/.test(pwd)) score++;
+    if (/[^a-zA-Zа-яА-ЯёЁ0-9]/.test(pwd) || (/[a-zа-я]/.test(pwd) && /[A-ZА-Я]/.test(pwd))) {
+      score++;
+    }
+    return score;
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     resetMessages();
@@ -424,8 +469,12 @@ export const AuthScreen: React.FC = () => {
       return;
     }
     if (isResettingPassword) {
-      if (resetNewPassword.length < 6) {
-        setLocalError('Новый пароль должен содержать минимум 6 символов');
+      if (!recoveryChallenge) {
+        await handleStartRecoveryChallenge();
+        return;
+      }
+      if (resetNewPassword.length < 8) {
+        setLocalError('Слабый пароль! Новый пароль должен содержать минимум 8 символов (буквы и цифры)');
         return;
       }
       if (resetNewPassword !== resetConfirmPassword) {
@@ -434,13 +483,18 @@ export const AuthScreen: React.FC = () => {
       }
       setIsLoading(true);
       try {
-        await resetForgottenPassword(
-          loginIdentifier.trim(),
-          resetNewPassword,
-          resetConfirmPassword
-        );
+        await resetForgottenPassword({
+          identifier: loginIdentifier.trim(),
+          newPassword: resetNewPassword,
+          confirmPassword: resetConfirmPassword,
+          otpCode: recoveryOtpInput.trim(),
+          expectedOtpCode: recoveryChallenge.otpCode,
+          otpExpiresAt: recoveryChallenge.expiresAt,
+          pin2FA: recoveryPin2FAInput.trim(),
+          ownerConfirmInput: recoveryOwnerConfirmInput.trim(),
+        });
       } catch (err: any) {
-        setLocalError(err?.message || 'Ошибка установки нового пароля');
+        setLocalError(err?.message || 'Ошибка проверки безопасности при смене пароля');
       } finally {
         setIsLoading(false);
       }
@@ -455,11 +509,18 @@ export const AuthScreen: React.FC = () => {
       await loginWithEmailAccount(loginIdentifier.trim(), passwordInput);
     } catch (err: any) {
       if (err?.message === 'MAX_PASSWORD_ATTEMPTS_REACHED') {
-        setIsResettingPassword(true);
         setPasswordInput('');
-        setLocalError(
-          'Использовано 5 из 5 попыток! Введите новый пароль и подтвердите его.'
-        );
+        try {
+          const challenge = await requestPasswordRecoveryChallenge(loginIdentifier.trim());
+          setRecoveryChallenge(challenge);
+          setIsResettingPassword(true);
+          setLocalError(
+            'Использовано 5 из 5 попыток! Пройдите защитную проверку и задайте новый пароль.'
+          );
+        } catch (chErr: any) {
+          setIsResettingPassword(true);
+          setLocalError(chErr?.message || 'Пройдите проверку безопасности для смены пароля.');
+        }
       } else {
         setLocalError(err?.message || 'Ошибка входа');
       }
@@ -527,8 +588,8 @@ export const AuthScreen: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#EDEEF0] flex items-center justify-center p-4 text-[#19191A] select-none">
-      <div className="w-full max-w-md bg-white rounded-2xl p-6 sm:p-7 shadow-sm border border-[#E1E3E6]">
+    <div className="h-[100dvh] overflow-y-auto bg-[#EDEEF0] flex flex-col items-center py-6 px-4 text-[#19191A] select-none">
+      <div className="w-full max-w-md my-auto bg-white rounded-2xl p-6 sm:p-7 shadow-sm border border-[#E1E3E6]">
         {/* Шапка с логотипом Mender и быстрым переключателем темы (Светлая / Тёмная / Свой) */}
         <div className="flex items-center justify-between gap-2 mb-4">
           <div className="flex items-center gap-3">
@@ -660,8 +721,12 @@ export const AuthScreen: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      resetMessages();
-                      setIsResettingPassword(true);
+                      if (loginIdentifier.trim()) {
+                        handleStartRecoveryChallenge();
+                      } else {
+                        resetMessages();
+                        setIsResettingPassword(true);
+                      }
                     }}
                     className="text-xs font-semibold text-[#0077FF] hover:underline cursor-pointer"
                   >
@@ -680,46 +745,153 @@ export const AuthScreen: React.FC = () => {
             ) : (
               <div className="p-3.5 rounded-xl bg-[#F7F8FA] border border-[#E1E3E6] space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[#19191A]">
-                    Установить новый пароль
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-[#0077FF]" />
+                    <span className="text-xs font-bold text-[#19191A]">
+                      Защищённое восстановление пароля
+                    </span>
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
                       resetMessages();
                       setIsResettingPassword(false);
+                      setRecoveryChallenge(null);
                     }}
                     className="text-xs font-semibold text-[#0077FF] hover:underline cursor-pointer"
                   >
                     Вспомнил пароль
                   </button>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#19191A] mb-1">
-                    Новый пароль (минимум 6 символов)
-                  </label>
-                  <input
-                    type="password"
-                    value={resetNewPassword}
-                    onChange={e => setResetNewPassword(e.target.value)}
-                    placeholder=""
-                    className="v7-input"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-[#19191A] mb-1">
-                    Подтвердите новый пароль
-                  </label>
-                  <input
-                    type="password"
-                    value={resetConfirmPassword}
-                    onChange={e => setResetConfirmPassword(e.target.value)}
-                    placeholder=""
-                    className="v7-input"
-                    required
-                  />
-                </div>
+
+                {!recoveryChallenge ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-[#626D7A]">
+                      Для защиты аккаунта от чужого сброса пароля сначала получите одноразовый 6-значный код безопасности.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleStartRecoveryChallenge}
+                      disabled={isLoading || !loginIdentifier.trim()}
+                      className="v7-btn text-xs py-2 justify-center"
+                    >
+                      <KeyRound className="w-4 h-4 shrink-0" />
+                      <span>Получить 6-значный защитный код</span>
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Одноразовый 6-значный код безопасности (3 минуты, макс. 3 попытки) */}
+                    <div className="p-2.5 rounded-lg bg-[#E5F1FF] border border-[#B8D9FF] text-xs text-[#19191A] flex items-center justify-between">
+                      <span>Одноразовый код безопасности (3 мин):</span>
+                      <span className="font-mono font-extrabold text-sm text-[#0077FF] tracking-widest">
+                        {recoveryChallenge.otpCode}
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#19191A] mb-1">
+                        1. Введите 6-значный код безопасности *
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={recoveryOtpInput}
+                        onChange={e => setRecoveryOtpInput(e.target.value.replace(/\D/g, ''))}
+                        placeholder=""
+                        className="v7-input font-mono tracking-widest"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#19191A] mb-1">
+                        2. Подтвердите точный @username владельца ({recoveryChallenge.maskedHint}) *
+                      </label>
+                      <input
+                        type="text"
+                        value={recoveryOwnerConfirmInput}
+                        onChange={e => setRecoveryOwnerConfirmInput(e.target.value)}
+                        placeholder=""
+                        className="v7-input"
+                        required
+                      />
+                    </div>
+
+                    {recoveryChallenge.requires2FaPin && (
+                      <div>
+                        <label className="block text-xs font-semibold text-[#19191A] mb-1">
+                          3. Введите ваш 2FA PIN-код безопасности (4–8 цифр) *
+                        </label>
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          maxLength={8}
+                          value={recoveryPin2FAInput}
+                          onChange={e => setRecoveryPin2FAInput(e.target.value.replace(/\D/g, ''))}
+                          placeholder=""
+                          className="v7-input font-mono"
+                          required
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#19191A] mb-1">
+                        Новый пароль (от 8 символов, буквы + цифры) *
+                      </label>
+                      <input
+                        type="password"
+                        value={resetNewPassword}
+                        onChange={e => setResetNewPassword(e.target.value)}
+                        placeholder=""
+                        className="v7-input"
+                        required
+                      />
+                      {/* Индикатор сложности пароля (4 уровня) */}
+                      <div className="mt-1.5 space-y-1">
+                        <div className="grid grid-cols-4 gap-1">
+                          {[1, 2, 3, 4].map(level => {
+                            const score = getPasswordStrengthScore(resetNewPassword);
+                            const active = score >= level;
+                            const color =
+                              score <= 1
+                                ? 'bg-[#E64646]'
+                                : score <= 2
+                                ? 'bg-[#FFA000]'
+                                : 'bg-[#4BB34B]';
+                            return (
+                              <div
+                                key={level}
+                                className={`h-1 rounded-full transition-colors ${
+                                  active ? color : 'bg-[#DCE1E6]'
+                                }`}
+                              />
+                            );
+                          })}
+                        </div>
+                        <div className="text-[11px] text-[#626D7A]">
+                          Защита: минимум 8 символов, обязательно буквы и цифры, до 3 попыток проверки кода.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#19191A] mb-1">
+                        Подтвердите новый пароль *
+                      </label>
+                      <input
+                        type="password"
+                        value={resetConfirmPassword}
+                        onChange={e => setResetConfirmPassword(e.target.value)}
+                        placeholder=""
+                        className="v7-input"
+                        required
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -728,9 +900,11 @@ export const AuthScreen: React.FC = () => {
                 <LogIn className="w-4 h-4 shrink-0" />
                 <span>
                   {isLoading
-                    ? 'Подождите...'
+                    ? 'Проверка защиты...'
                     : isResettingPassword
-                    ? 'Подтвердить новый пароль и войти'
+                    ? recoveryChallenge
+                      ? 'Подтвердить код, сменить пароль и войти'
+                      : 'Запросить защитный код восстановления'
                     : 'Войти в Mender'}
                 </span>
               </button>

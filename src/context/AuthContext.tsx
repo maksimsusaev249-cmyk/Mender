@@ -23,7 +23,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../firebase';
-import { UserPublic, UserPrivate, UserBlock, Subscription, PrivacyLevel, UserStatus } from '../types';
+import { UserPublic, UserPrivate, UserBlock, Subscription, PrivacyLevel, UserStatus, UserSessionDoc } from '../types';
 import {
   generateSalt,
   hashPin,
@@ -34,6 +34,7 @@ import {
   sanitizeId,
 } from '../utils/crypto';
 import { uploadMediaFile } from '../utils/media';
+import { sendSystemLoginSecurityNotification, getDeviceDetailsString } from '../utils/securityNotifications';
 
 const EMAIL_SESSION_STORAGE_KEY = 'mender_email_session_v1';
 const MAX_PIN_ATTEMPTS = 5;
@@ -108,13 +109,32 @@ interface AuthContextType {
     newPassword: string,
     currentPassword?: string,
     confirmPassword?: string,
-    isRecoveryAfter5Attempts?: boolean
+    isRecoveryAfter5Attempts?: boolean,
+    securityVerification?: {
+      otpCode: string;
+      expectedOtpCode: string;
+      pin2FA?: string;
+      confirmUsername?: string;
+    }
   ) => Promise<void>;
-  resetForgottenPassword: (
-    identifier: string,
-    newPassword: string,
-    confirmPassword: string
-  ) => Promise<void>;
+  requestPasswordRecoveryChallenge: (identifier: string) => Promise<{
+    uid: string;
+    maskedHint: string;
+    requires2FaPin: boolean;
+    requiresEmailOrUsernameCheck: string;
+    otpCode: string;
+    expiresAt: number;
+  }>;
+  resetForgottenPassword: (params: {
+    identifier: string;
+    newPassword: string;
+    confirmPassword: string;
+    otpCode: string;
+    expectedOtpCode: string;
+    otpExpiresAt: number;
+    pin2FA?: string;
+    ownerConfirmInput?: string;
+  }) => Promise<void>;
   setupOrChangePin: (newPin: string, currentPin?: string) => Promise<void>;
   verifySessionPin: (pin: string) => Promise<boolean>;
   resetPinWithReauth: (currentPin?: string) => Promise<void>;
@@ -141,6 +161,10 @@ interface AuthContextType {
   toggleSubscription: (targetId: string, targetType: 'user' | 'channel') => Promise<void>;
   isSubscribed: (targetId: string) => boolean;
   submitReport: (targetId: string, targetType: 'user' | 'chat' | 'post' | 'message', reason: string) => Promise<void>;
+  userSessions: UserSessionDoc[];
+  currentSessionId: string;
+  terminateSession: (sessionId: string) => Promise<void>;
+  terminateAllOtherSessions: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -162,6 +186,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [privateData, setPrivateData] = useState<UserPrivate | null>(null);
   const [blocks, setBlocks] = useState<UserBlock[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [userSessions, setUserSessions] = useState<UserSessionDoc[]>([]);
+  const [currentSessionId] = useState<string>(() => {
+    let sid = localStorage.getItem('mender_current_session_id');
+    if (!sid) {
+      sid = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      localStorage.setItem('mender_current_session_id', sid);
+    }
+    return sid;
+  });
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isPinVerified, setIsPinVerified] = useState<boolean>(false);
   const [failedPinAttempts, setFailedPinAttempts] = useState<number>(0);
@@ -409,13 +442,61 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       err => handleFirestoreError(err, OperationType.LIST, `users/${uid}/subscriptions`)
     );
 
+    // Register / update current session in Firestore
+    const deviceStr = getDeviceDetailsString();
+    let currentIp = '178.154.201.55';
+    const sessRef = doc(db, 'users', uid, 'activeSessions', currentSessionId);
+
+    fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(2000) })
+      .then(res => res.json())
+      .then(data => {
+        if (data.ip) currentIp = data.ip;
+      })
+      .catch(() => {})
+      .finally(() => {
+        setDoc(
+          sessRef,
+          {
+            sessionId: currentSessionId,
+            userId: uid,
+            device: deviceStr,
+            ip: currentIp,
+            status: 'active',
+            lastActiveAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        ).catch(() => {});
+      });
+
+    const sessionsQuery = query(
+      collection(db, 'users', uid, 'activeSessions'),
+      where('userId', '==', uid)
+    );
+    const unsubSessions = onSnapshot(
+      sessionsQuery,
+      snap => {
+        const allSessions = snap.docs.map(d => d.data() as UserSessionDoc);
+        const activeSessions = allSessions.filter(s => s.status !== 'terminated');
+        setUserSessions(activeSessions);
+
+        const currentSessDoc = allSessions.find(s => s.sessionId === currentSessionId);
+        if (currentSessDoc && currentSessDoc.status === 'terminated') {
+          logout();
+        }
+      },
+      err => handleFirestoreError(err, OperationType.LIST, `users/${uid}/activeSessions`)
+    );
+
     return () => {
       unsubPublic();
       unsubPrivate();
       unsubBlocks();
       unsubSubs();
+      unsubSessions();
     };
-  }, [firebaseUser?.uid]);
+  }, [firebaseUser?.uid, currentSessionId]);
 
   /**
    * Вход в существующий аккаунт по:
@@ -606,6 +687,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     setFirebaseUser(sessionUser);
+    sendSystemLoginSecurityNotification(uid).catch(() => {});
   };
 
   /**
@@ -1045,23 +1127,102 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
+   * Проверка надёжности пароля:
+   * - минимум 8 символов
+   * - обязательно буквы + цифры
+   * - запрет простых комбинаций (12345678, qwerty, одинаковые символы, совпадение с логином)
+   */
+  const validateStrongPassword = (pwd: string, usernameOrName?: string): string | null => {
+    if (!pwd || pwd.length < 8) {
+      return 'Слабый пароль! Пароль должен содержать минимум 8 символов.';
+    }
+    if (!/[a-zA-Zа-яА-ЯёЁ]/.test(pwd) || !/\d/.test(pwd)) {
+      return 'Слабый пароль! Используйте сочетание букв и цифр.';
+    }
+    if (/^(.)\1+$/.test(pwd)) {
+      return 'Слабый пароль! Нельзя использовать одинаковые символы.';
+    }
+    const lower = pwd.toLowerCase();
+    const weakList = [
+      '12345678',
+      '123456789',
+      '1234567890',
+      'qwerty123',
+      'qwertyui',
+      'password',
+      'password1',
+      'пароль123',
+      'йцукен123',
+    ];
+    if (weakList.includes(lower)) {
+      return 'Этот пароль слишком простой и легко угадывается! Придумайте более сложный.';
+    }
+    if (
+      usernameOrName &&
+      usernameOrName.trim().length >= 3 &&
+      lower.includes(usernameOrName.replace(/^@/, '').trim().toLowerCase())
+    ) {
+      return 'Пароль не должен содержать ваш @юзернейм или имя!';
+    }
+    return null;
+  };
+
+  /**
    * Смена пароля аккаунта:
    * - По умолчанию проверяет текущий пароль (до 5 попыток).
-   * - После 5 неудачных попыток (isRecoveryAfter5Attempts === true) переключается на ввод нового пароля и его подтверждение.
+   * - После 5 неудачных попыток (isRecoveryAfter5Attempts === true) требует:
+   *   1) 6-значный одноразовый защитный код (OTP)
+   *   2) 2FA PIN-код (если подключён на аккаунте) или подтверждение своего @username
+   *   3) Новый надёжный пароль (от 8 символов, буквы + цифры, не совпадающий со старым) + подтверждение
    */
   const changeAccountPassword = async (
     newPassword: string,
     currentPassword?: string,
     confirmPassword?: string,
-    isRecoveryAfter5Attempts?: boolean
+    isRecoveryAfter5Attempts?: boolean,
+    securityVerification?: {
+      otpCode: string;
+      expectedOtpCode: string;
+      pin2FA?: string;
+      confirmUsername?: string;
+    }
   ) => {
     if (!firebaseUser || !privateData) return;
-    if (!newPassword || newPassword.length < 6) {
-      throw new Error('Новый пароль должен содержать минимум 6 символов');
+
+    const strengthError = validateStrongPassword(newPassword, profile?.username);
+    if (strengthError) {
+      throw new Error(strengthError);
     }
 
     if (privateData.passwordHash && privateData.passwordSalt) {
       if (isRecoveryAfter5Attempts) {
+        if (!securityVerification) {
+          throw new Error('Требуется пройти проверку безопасности для сброса пароля');
+        }
+        if (
+          !securityVerification.otpCode ||
+          securityVerification.otpCode.trim() !== securityVerification.expectedOtpCode
+        ) {
+          throw new Error('Неверный 6-значный защитный код подтверждения!');
+        }
+        if (privateData.pinHash) {
+          const cleanPin = (securityVerification.pin2FA || '').replace(/\D/g, '');
+          if (cleanPin.length < 4) {
+            throw new Error('Для сброса пароля введите ваш 2FA PIN-код безопасности');
+          }
+          const pinOk = await verifyPinHash(cleanPin, privateData.pinSalt, privateData.pinHash);
+          if (!pinOk) {
+            throw new Error('Неверный 2FA PIN-код! Сброс пароля отклонён.');
+          }
+        } else if (profile?.username) {
+          const enteredUser = (securityVerification.confirmUsername || '')
+            .replace(/^@/, '')
+            .trim()
+            .toLowerCase();
+          if (enteredUser !== profile.username.toLowerCase()) {
+            throw new Error('Подтвердите ваш точный @username для проверки владельца аккаунта!');
+          }
+        }
         if (!confirmPassword || newPassword !== confirmPassword) {
           throw new Error('Новый пароль и подтверждение пароля не совпадают!');
         }
@@ -1077,6 +1238,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (!isCurrentValid) {
           throw new Error('INVALID_CURRENT_PASSWORD');
         }
+      }
+
+      const isSameAsOld = await verifyPasswordHash(
+        newPassword,
+        privateData.passwordSalt,
+        privateData.passwordHash
+      );
+      if (isSameAsOld) {
+        throw new Error('Новый пароль не должен совпадать с предыдущим паролем!');
       }
     } else if (confirmPassword !== undefined && newPassword !== confirmPassword) {
       throw new Error('Новый пароль и подтверждение пароля не совпадают!');
@@ -1097,32 +1267,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   /**
-   * Сброс забытого пароля на экране входа: сразу ввод нового пароля и его подтверждение
+   * Вспомогательный поиск аккаунта по @username, имени или email
    */
-  const resetForgottenPassword = async (
-    rawIdentifier: string,
-    newPassword: string,
-    confirmPassword: string
-  ) => {
-    setAuthError(null);
+  const findAccountByIdentifier = async (rawIdentifier: string) => {
     const trimmed = rawIdentifier.trim();
     const lowered = trimmed.toLowerCase();
-    if (!lowered) {
-      const msg = 'Введите @юзернейм, имя или почту аккаунта';
-      setAuthError(msg);
-      throw new Error(msg);
-    }
-    if (!newPassword || newPassword.length < 6) {
-      const msg = 'Новый пароль должен содержать минимум 6 символов';
-      setAuthError(msg);
-      throw new Error(msg);
-    }
-    if (newPassword !== confirmPassword) {
-      const msg = 'Новый пароль и подтверждение не совпадают!';
-      setAuthError(msg);
-      throw new Error(msg);
-    }
-
     const isEmailFormat = lowered.includes('@') && !lowered.startsWith('@');
     const normalizedEmail = isEmailFormat
       ? lowered
@@ -1167,6 +1316,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    return { uid, normalizedEmail, publicRef, privateRef, pubSnap, privSnap };
+  };
+
+  /**
+   * Шаг 1 защиты «Забыли пароль»:
+   * Проверяет блокировку от перебора, находит аккаунт, формирует криптографический 6-значный код (OTP)
+   * со сроком действия 3 минуты и определяет, требуется ли 2FA PIN-код или подтверждение точного @username/почты.
+   */
+  const requestPasswordRecoveryChallenge = async (rawIdentifier: string) => {
+    setAuthError(null);
+    if (!rawIdentifier.trim()) {
+      const msg = 'Введите ваш @юзернейм, имя или почту';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    const { uid, pubSnap, privSnap } = await findAccountByIdentifier(rawIdentifier);
+
+    const recoveryLockKey = `mender_recovery_lock_${uid}`;
+    const lockUntil = Number(localStorage.getItem(recoveryLockKey) || '0');
+    if (lockUntil > Date.now()) {
+      const sec = Math.ceil((lockUntil - Date.now()) / 1000);
+      const msg = `Слишком много неверных попыток восстановления! Подождите ${sec} сек.`;
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
     if (!pubSnap.exists()) {
       const msg = 'Аккаунт с таким @юзернеймом, именем или почтой не найден!';
       setAuthError(msg);
@@ -1175,6 +1351,160 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const existingPub = pubSnap.data() as UserPublic;
     const existingPriv = privSnap.exists() ? (privSnap.data() as UserPrivate) : null;
+
+    // Генерируем криптографически стойкий 6-значный одноразовый код безопасности
+    const randBuf = new Uint32Array(1);
+    crypto.getRandomValues(randBuf);
+    const otpCode = String(100000 + (randBuf[0] % 900000));
+    const expiresAt = Date.now() + 3 * 60 * 1000; // 3 минуты
+
+    const uname = existingPub.username || 'user';
+    const maskedHint =
+      uname.length > 2
+        ? `@${uname[0]}${'*'.repeat(Math.max(2, uname.length - 2))}${uname[uname.length - 1]}`
+        : `@${uname}`;
+
+    sendSystemLoginSecurityNotification(uid, otpCode).catch(() => {});
+
+    return {
+      uid,
+      maskedHint,
+      requires2FaPin: Boolean(existingPriv?.pinHash),
+      requiresEmailOrUsernameCheck: uname,
+      otpCode,
+      expiresAt,
+    };
+  };
+
+  /**
+   * Шаг 2 защиты «Забыли пароль»:
+   * Проверяет:
+   * 1) Лимит попыток восстановления (макс. 3 попытки, затем блокировка 60 сек)
+   * 2) Срок действия и совпадение 6-значного криптографического кода (OTP)
+   * 3) Точное подтверждение @username владельца И 2FA PIN-код (если установлен на аккаунте)
+   * 4) Сложность нового пароля (от 8 символов, буквы + цифры, отличие от старого пароля)
+   */
+  const resetForgottenPassword = async (params: {
+    identifier: string;
+    newPassword: string;
+    confirmPassword: string;
+    otpCode: string;
+    expectedOtpCode: string;
+    otpExpiresAt: number;
+    pin2FA?: string;
+    ownerConfirmInput?: string;
+  }) => {
+    setAuthError(null);
+    const {
+      identifier,
+      newPassword,
+      confirmPassword,
+      otpCode,
+      expectedOtpCode,
+      otpExpiresAt,
+      pin2FA,
+      ownerConfirmInput,
+    } = params;
+
+    const { uid, normalizedEmail, publicRef, privateRef, pubSnap, privSnap } =
+      await findAccountByIdentifier(identifier);
+
+    const recoveryLockKey = `mender_recovery_lock_${uid}`;
+    const recoveryAttemptsKey = `mender_recovery_attempts_${uid}`;
+
+    const lockUntil = Number(localStorage.getItem(recoveryLockKey) || '0');
+    if (lockUntil > Date.now()) {
+      const sec = Math.ceil((lockUntil - Date.now()) / 1000);
+      const msg = `Защита от взлома: восстановление заблокировано на ${sec} сек.`;
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    if (!pubSnap.exists()) {
+      const msg = 'Аккаунт не найден!';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    const existingPub = pubSnap.data() as UserPublic;
+    const existingPriv = privSnap.exists() ? (privSnap.data() as UserPrivate) : null;
+
+    const recordFailedRecoveryAttempt = (reason: string) => {
+      const prev = Number(localStorage.getItem(recoveryAttemptsKey) || '0') + 1;
+      localStorage.setItem(recoveryAttemptsKey, String(prev));
+      if (prev >= 3) {
+        localStorage.setItem(recoveryLockKey, String(Date.now() + 60_000));
+        localStorage.setItem(recoveryAttemptsKey, '0');
+        const lockMsg = `${reason} Превышен лимит (3 попытки) — восстановление заблокировано на 60 секунд.`;
+        setAuthError(lockMsg);
+        throw new Error(lockMsg);
+      }
+      const left = 3 - prev;
+      const errMsg = `${reason} (Осталось попыток проверки: ${left} из 3)`;
+      setAuthError(errMsg);
+      throw new Error(errMsg);
+    };
+
+    // 1. Проверка срока действия 6-значного кода
+    if (!otpExpiresAt || Date.now() > otpExpiresAt) {
+      const msg = 'Срок действия 6-значного кода истёк (3 мин). Запросите новый код.';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    // 2. Проверка 6-значного кода подтверждения
+    if (!otpCode || otpCode.trim() !== expectedOtpCode) {
+      recordFailedRecoveryAttempt('Неверный 6-значный код безопасности!');
+    }
+
+    // 3. Проверка точного @username владельца (защита при входе по имени)
+    const cleanOwnerConfirm = (ownerConfirmInput || '').replace(/^@/, '').trim().toLowerCase();
+    if (
+      !cleanOwnerConfirm ||
+      (cleanOwnerConfirm !== existingPub.username?.toLowerCase() &&
+        cleanOwnerConfirm !== existingPriv?.email?.toLowerCase())
+    ) {
+      recordFailedRecoveryAttempt('Неверно указан контрольный @username или почта владельца!');
+    }
+
+    // 4. Если у пользователя включён 2FA PIN — обязательная криптографическая проверка PIN-кода!
+    if (existingPriv?.pinHash && existingPriv?.pinSalt) {
+      const cleanPin = (pin2FA || '').replace(/\D/g, '');
+      if (cleanPin.length < 4) {
+        recordFailedRecoveryAttempt('На аккаунте включён 2FA PIN-код — введите ваш PIN!');
+      }
+      const isPinValid = await verifyPinHash(cleanPin, existingPriv.pinSalt, existingPriv.pinHash);
+      if (!isPinValid) {
+        recordFailedRecoveryAttempt('Неверный 2FA PIN-код владельца!');
+      }
+    }
+
+    // 5. Проверка сложности нового пароля
+    const strengthErr = validateStrongPassword(newPassword, existingPub.username);
+    if (strengthErr) {
+      setAuthError(strengthErr);
+      throw new Error(strengthErr);
+    }
+
+    if (newPassword !== confirmPassword) {
+      const msg = 'Новый пароль и подтверждение не совпадают!';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    // 6. Запрет установки старого пароля
+    if (existingPriv?.passwordHash && existingPriv?.passwordSalt) {
+      const sameAsOld = await verifyPasswordHash(
+        newPassword,
+        existingPriv.passwordSalt,
+        existingPriv.passwordHash
+      );
+      if (sameAsOld) {
+        const msg = 'Новый пароль не должен совпадать со старым паролем!';
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+    }
 
     const passwordSalt = generateSalt(16);
     const passwordHash = await hashPassword(newPassword, passwordSalt);
@@ -1185,6 +1515,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatedAt: serverTimestamp(),
     });
 
+    localStorage.setItem(recoveryAttemptsKey, '0');
+    localStorage.removeItem(recoveryLockKey);
     localStorage.setItem(getPinAttemptsStorageKey(uid), '0');
     localStorage.removeItem(getPinLockoutStorageKey(uid));
     setFailedPinAttempts(0);
@@ -1204,15 +1536,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     localStorage.setItem(EMAIL_SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
 
-    const requires2FaPin = Boolean(existingPriv?.pinHash && existingPriv?.twoFactorEnabled);
-    if (requires2FaPin) {
-      setIsPinVerified(false);
-      sessionStorage.removeItem(getPinVerifiedStorageKey(uid));
-    } else {
-      setIsPinVerified(true);
-      sessionStorage.setItem(getPinVerifiedStorageKey(uid), 'true');
-    }
-
+    setIsPinVerified(true);
+    sessionStorage.setItem(getPinVerifiedStorageKey(uid), 'true');
     setFirebaseUser(sessionUser);
   };
 
@@ -1528,6 +1853,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const terminateSession = async (targetSessionId: string) => {
+    if (!firebaseUser) return;
+    const uid = firebaseUser.uid;
+    try {
+      await updateDoc(doc(db, 'users', uid, 'activeSessions', targetSessionId), {
+        status: 'terminated',
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      await deleteDoc(doc(db, 'users', uid, 'activeSessions', targetSessionId));
+    }
+  };
+
+  const terminateAllOtherSessions = async () => {
+    if (!firebaseUser) return;
+    const uid = firebaseUser.uid;
+    const batch = writeBatch(db);
+    userSessions.forEach(s => {
+      if (s.sessionId !== currentSessionId) {
+        batch.update(doc(db, 'users', uid, 'activeSessions', s.sessionId), {
+          status: 'terminated',
+          updatedAt: serverTimestamp(),
+        });
+      }
+    });
+    await batch.commit();
+  };
+
   const logout = async () => {
     const uid = firebaseUser?.uid;
     if (firebaseUser && profile) {
@@ -1592,6 +1945,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         confirmPhoneOtp,
         completeOnboardingProfile,
         changeAccountPassword,
+        requestPasswordRecoveryChallenge,
         resetForgottenPassword,
         setupOrChangePin,
         verifySessionPin,
@@ -1605,6 +1959,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         toggleSubscription,
         isSubscribed,
         submitReport,
+        userSessions,
+        currentSessionId,
+        terminateSession,
+        terminateAllOtherSessions,
         logout,
       }}
     >

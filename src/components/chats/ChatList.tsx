@@ -10,6 +10,8 @@ import {
   UserPlus,
   Sparkles,
   MessageSquarePlus,
+  ShieldCheck,
+  CheckCircle2,
 } from 'lucide-react';
 import { CreateGroupModal } from './CreateGroupModal';
 import { SearchModal } from '../search/SearchModal';
@@ -78,6 +80,18 @@ export const ChatList: React.FC = () => {
             <span className="text-xs text-[#818C99] font-medium">({filteredChats.length})</span>
           </div>
           <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (profile?.uid) {
+                  setActiveChatId(`chat_system_security_${profile.uid}`);
+                }
+              }}
+              className="p-1.5 rounded-lg hover:bg-[#EDEFEF] text-[#0077FF] hover:text-[#0066EA] transition-colors cursor-pointer"
+              title="Открыть системный чат безопасности (Mender Безопасность)"
+            >
+              <ShieldCheck className="w-4 h-4 text-[#0077FF]" />
+            </button>
             <button
               type="button"
               onClick={() => setShowWallpaperModal(true)}
@@ -204,13 +218,19 @@ export const ChatList: React.FC = () => {
         ) : (
           filteredChats.map(chat => {
             const isActive = chat.chatId === activeChatId;
+            const isSystemSecurityChat =
+              chat.peerUserId === 'mender_security_bot' ||
+              chat.chatId.startsWith('chat_system_security_');
+
             return (
               <div
                 key={chat.chatId}
                 onClick={() => setActiveChatId(chat.chatId)}
-                className={`flex items-center gap-3 px-3 py-2.5 transition-colors cursor-pointer ${
+                className={`flex items-center gap-3 px-3 py-2.5 transition-all cursor-pointer ${
                   isActive
                     ? 'bg-[#E5EBF1] border-l-3 border-[#0077FF]'
+                    : isSystemSecurityChat
+                    ? 'bg-[#EBF3FF] hover:bg-[#E0EEFF] border-l-3 border-[#0077FF] shadow-2xs'
                     : 'hover:bg-[#F5F6F8] border-l-3 border-transparent'
                 }`}
               >
@@ -218,17 +238,23 @@ export const ChatList: React.FC = () => {
                   <img
                     src={chat.avatarUrl}
                     alt={chat.name}
-                    className="w-11 h-11 rounded-full object-cover bg-[#EDEFEF] border border-[#E1E3E6]"
+                    className={`w-11 h-11 rounded-full object-cover ${
+                      isSystemSecurityChat
+                        ? 'bg-[#E5F1FF] border-2 border-[#0077FF]/40 shadow-xs'
+                        : 'bg-[#EDEFEF] border border-[#0077FF]/20'
+                    }`}
                   />
-                  {chat.type === 'direct' && (
+                  {isSystemSecurityChat ? (
+                    <span className="absolute -bottom-0.5 -right-0.5 w-4.5 h-4.5 rounded-full bg-[#0077FF] text-white flex items-center justify-center text-[9px] ring-2 ring-white shadow-xs">
+                      <ShieldCheck className="w-3 h-3" />
+                    </span>
+                  ) : chat.type === 'direct' ? (
                     <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#4BB34B] ring-2 ring-white" />
-                  )}
-                  {chat.type === 'group' && (
+                  ) : chat.type === 'group' ? (
                     <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#0077FF] text-white flex items-center justify-center text-[9px]">
                       <Users className="w-2.5 h-2.5" />
                     </span>
-                  )}
-                  {chat.type === 'channel' && (
+                  ) : (
                     <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#2688EB] text-white flex items-center justify-center text-[9px]">
                       <Radio className="w-2.5 h-2.5" />
                     </span>
@@ -238,18 +264,34 @@ export const ChatList: React.FC = () => {
                 <div className="flex-1 overflow-hidden">
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="flex items-center gap-1.5 overflow-hidden">
-                      <h4 className="text-sm font-semibold text-[#19191A] truncate">
-                        {chat.name}
+                      <h4 className={`text-sm font-bold truncate flex items-center gap-1 ${
+                        isSystemSecurityChat ? 'text-[#0B1E36]' : 'text-[#19191A]'
+                      }`}>
+                        <span>{chat.name}</span>
+                        {isSystemSecurityChat && (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-[#0077FF] fill-[#0077FF]/20 shrink-0" />
+                        )}
                       </h4>
-                      {chat.isPinned && <Pin className="w-3 h-3 text-[#0077FF] shrink-0" />}
+                      {isSystemSecurityChat && (
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-[#0077FF] text-white tracking-widest shrink-0 shadow-2xs uppercase">
+                          СИСТЕМА
+                        </span>
+                      )}
+                      {chat.isPinned && !isSystemSecurityChat && (
+                        <Pin className="w-3 h-3 text-[#0077FF] shrink-0" />
+                      )}
                       {chat.isMuted && <VolumeX className="w-3 h-3 text-[#818C99] shrink-0" />}
                     </div>
-                    <span className="text-[11px] text-[#818C99] shrink-0">
+                    <span className={`text-[11px] shrink-0 font-medium ${
+                      isSystemSecurityChat ? 'text-[#0055C4] font-semibold' : 'text-[#818C99]'
+                    }`}>
                       {formatTime(chat.updatedAt)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-[#656565] truncate">
+                    <p className={`text-xs truncate ${
+                      isSystemSecurityChat ? 'text-[#1E3A8A] font-semibold' : 'text-[#555555]'
+                    }`}>
                       {chat.lastMessageText || chat.description || 'Нажмите для открытия диалога'}
                     </p>
                   </div>
