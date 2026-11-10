@@ -1,0 +1,6 @@
+{
+  "name": "Mender Messenger",
+  "description": "Modern Web Messenger, Audio/Video Calls, and Social Feed",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,485 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Public profile information for a Mender user (PII isolated in UserPrivate).",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "username": { "type": "string", "minLength": 3, "maxLength": 40, "pattern": "^[a-zA-Z0-9_]+$" },
+        "avatarUrl": { "type": "string", "maxLength": 2000 },
+        "bio": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["online", "offline", "busy"] },
+        "privacyLastSeen": { "type": "string", "enum": ["everyone", "contacts", "nobody"] },
+        "privacyPhoto": { "type": "string", "enum": ["everyone", "contacts", "nobody"] },
+        "privacyCalls": { "type": "string", "enum": ["everyone", "contacts", "nobody"] },
+        "followersCount": { "type": "integer" },
+        "followingCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "username",
+        "avatarUrl",
+        "bio",
+        "status",
+        "privacyLastSeen",
+        "privacyPhoto",
+        "privacyCalls",
+        "followersCount",
+        "followingCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Strictly isolated PII and security settings for a Mender user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 254 },
+        "phone": { "type": "string", "maxLength": 32 },
+        "pinHash": { "type": "string", "maxLength": 128 },
+        "pinSalt": { "type": "string", "maxLength": 64 },
+        "passwordHash": { "type": "string", "maxLength": 128 },
+        "passwordSalt": { "type": "string", "maxLength": 64 },
+        "darkMode": { "type": "boolean" },
+        "notificationsEnabled": { "type": "boolean" },
+        "soundEnabled": { "type": "boolean" },
+        "twoFactorEnabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "email",
+        "phone",
+        "pinHash",
+        "pinSalt",
+        "darkMode",
+        "notificationsEnabled",
+        "soundEnabled",
+        "twoFactorEnabled",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserBlock": {
+      "title": "UserBlock",
+      "description": "Record of a blocked user in a user's private block list.",
+      "type": "object",
+      "properties": {
+        "blockerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "blockedUserId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reason": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["blockerId", "blockedUserId", "reason", "createdAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "User subscription to another user or channel.",
+      "type": "object",
+      "properties": {
+        "subscriberId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "targetId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "targetType": { "type": "string", "enum": ["user", "channel"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["subscriberId", "targetId", "targetType", "createdAt"]
+    },
+    "WallpaperConfig": {
+      "title": "WallpaperConfig",
+      "description": "Global or per-chat wallpaper customization settings for a user.",
+      "type": "object",
+      "properties": {
+        "scopeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "wallpaperId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sourceType": { "type": "string", "enum": ["builtin", "custom", "color"] },
+        "imageUrl": { "type": "string", "maxLength": 800000 },
+        "backgroundColor": { "type": "string", "maxLength": 32 },
+        "dimming": { "type": "integer" },
+        "brightness": { "type": "integer" },
+        "blur": { "type": "integer" },
+        "scale": { "type": "integer" },
+        "posX": { "type": "integer" },
+        "posY": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "scopeId",
+        "userId",
+        "wallpaperId",
+        "sourceType",
+        "imageUrl",
+        "backgroundColor",
+        "dimming",
+        "brightness",
+        "blur",
+        "scale",
+        "posX",
+        "posY",
+        "updatedAt"
+      ]
+    },
+    "CustomWallpaper": {
+      "title": "CustomWallpaper",
+      "description": "User-uploaded custom wallpaper metadata and image storage reference.",
+      "type": "object",
+      "properties": {
+        "wallpaperId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "imageUrl": { "type": "string", "minLength": 1, "maxLength": 800000 },
+        "storagePath": { "type": "string", "maxLength": 500 },
+        "mimeType": { "type": "string", "maxLength": 40 },
+        "sizeBytes": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "wallpaperId",
+        "userId",
+        "name",
+        "imageUrl",
+        "storagePath",
+        "mimeType",
+        "sizeBytes",
+        "createdAt"
+      ]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Direct conversation, group chat, or broadcast channel.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["direct", "group", "channel"] },
+        "visibility": { "type": "string", "enum": ["public", "private"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "avatarUrl": { "type": "string", "maxLength": 2000 },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "peerUserId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "membersCount": { "type": "integer" },
+        "lastMessageText": { "type": "string", "maxLength": 500 },
+        "lastMessageType": { "type": "string", "enum": ["text", "image", "video", "voice", "video_circle"] },
+        "lastMessageSenderId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "chatId",
+        "type",
+        "visibility",
+        "name",
+        "description",
+        "avatarUrl",
+        "ownerId",
+        "peerUserId",
+        "membersCount",
+        "lastMessageText",
+        "lastMessageType",
+        "lastMessageSenderId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ChatMember": {
+      "title": "ChatMember",
+      "description": "Membership and role record within a chat, group, or channel.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["owner", "admin", "moderator", "member"] },
+        "displayName": { "type": "string", "maxLength": 80 },
+        "avatarUrl": { "type": "string", "maxLength": 2000 },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["chatId", "userId", "role", "displayName", "avatarUrl", "joinedAt"]
+    },
+    "UserMembership": {
+      "title": "UserMembership",
+      "description": "User-owned index of chats they participate in.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "chatId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["owner", "admin", "moderator", "member"] },
+        "isPinned": { "type": "boolean" },
+        "isMuted": { "type": "boolean" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "chatId", "role", "isPinned", "isMuted", "joinedAt", "updatedAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Message inside a chat, group, or channel.",
+      "type": "object",
+      "properties": {
+        "messageId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "chatId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderName": { "type": "string", "maxLength": 80 },
+        "senderAvatar": { "type": "string", "maxLength": 2000 },
+        "recipientId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "chatVisibility": { "type": "string", "enum": ["public", "private"] },
+        "type": { "type": "string", "enum": ["text", "image", "video", "voice", "video_circle"] },
+        "content": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "mediaUrl": { "type": "string", "maxLength": 800000 },
+        "duration": { "type": "integer" },
+        "status": { "type": "string", "enum": ["sent", "delivered", "read"] },
+        "likesCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "messageId",
+        "chatId",
+        "senderId",
+        "senderName",
+        "senderAvatar",
+        "recipientId",
+        "chatVisibility",
+        "type",
+        "content",
+        "mediaUrl",
+        "duration",
+        "status",
+        "likesCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Social feed publication with text, image, or video.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "maxLength": 80 },
+        "authorUsername": { "type": "string", "maxLength": 40 },
+        "authorAvatar": { "type": "string", "maxLength": 2000 },
+        "visibility": { "type": "string", "enum": ["public", "private"] },
+        "content": { "type": "string", "minLength": 1, "maxLength": 3000 },
+        "mediaUrl": { "type": "string", "maxLength": 800000 },
+        "mediaType": { "type": "string", "enum": ["none", "image", "video"] },
+        "likesCount": { "type": "integer" },
+        "commentsCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "postId",
+        "authorId",
+        "authorName",
+        "authorUsername",
+        "authorAvatar",
+        "visibility",
+        "content",
+        "mediaUrl",
+        "mediaType",
+        "likesCount",
+        "commentsCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PostLike": {
+      "title": "PostLike",
+      "description": "Like interaction on a social feed post.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "userId", "createdAt"]
+    },
+    "PostComment": {
+      "title": "PostComment",
+      "description": "Comment on a social feed post.",
+      "type": "object",
+      "properties": {
+        "commentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "postId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "maxLength": 80 },
+        "authorAvatar": { "type": "string", "maxLength": 2000 },
+        "postVisibility": { "type": "string", "enum": ["public", "private"] },
+        "content": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "commentId",
+        "postId",
+        "authorId",
+        "authorName",
+        "authorAvatar",
+        "postVisibility",
+        "content",
+        "createdAt"
+      ]
+    },
+    "CallSession": {
+      "title": "CallSession",
+      "description": "WebRTC signaling session for audio, video, and screen sharing.",
+      "type": "object",
+      "properties": {
+        "callId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "chatId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "callerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "callerName": { "type": "string", "maxLength": 80 },
+        "callerAvatar": { "type": "string", "maxLength": 2000 },
+        "calleeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["audio", "video"] },
+        "status": { "type": "string", "enum": ["ringing", "connected", "ended"] },
+        "isScreenSharing": { "type": "boolean" },
+        "offerSdp": { "type": "string", "maxLength": 30000 },
+        "offerType": { "type": "string", "maxLength": 20 },
+        "answerSdp": { "type": "string", "maxLength": 30000 },
+        "answerType": { "type": "string", "maxLength": 20 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "callId",
+        "chatId",
+        "callerId",
+        "callerName",
+        "callerAvatar",
+        "calleeId",
+        "type",
+        "status",
+        "isScreenSharing",
+        "offerSdp",
+        "offerType",
+        "answerSdp",
+        "answerType",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "IceCandidate": {
+      "title": "IceCandidate",
+      "description": "WebRTC ICE candidate for peer connection establishment.",
+      "type": "object",
+      "properties": {
+        "candidateId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "callId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "senderId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recipientId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "candidate": { "type": "string", "maxLength": 2000 },
+        "sdpMid": { "type": "string", "maxLength": 64 },
+        "sdpMLineIndex": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "candidateId",
+        "callId",
+        "senderId",
+        "recipientId",
+        "candidate",
+        "sdpMid",
+        "sdpMLineIndex",
+        "createdAt"
+      ]
+    },
+    "Report": {
+      "title": "Report",
+      "description": "Abuse or violation report submitted by a user.",
+      "type": "object",
+      "properties": {
+        "reportId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "reporterId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "targetId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "targetType": { "type": "string", "enum": ["user", "chat", "post", "message"] },
+        "reason": { "type": "string", "minLength": 3, "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["open", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "reportId",
+        "reporterId",
+        "targetId",
+        "targetType",
+        "reason",
+        "status",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserPublic",
+      "description": "Public user profiles searchable by other users."
+    },
+    "/users_private/{userId}": {
+      "schema": "UserPrivate",
+      "description": "Private PII and hashed PIN settings accessible strictly by owner."
+    },
+    "/users_private/{userId}/blocks/{blockedUserId}": {
+      "schema": "UserBlock",
+      "description": "Subcollection of users blocked by {userId}."
+    },
+    "/users/{userId}/subscriptions/{targetId}": {
+      "schema": "Subscription",
+      "description": "Subscriptions of {userId} to other users or channels."
+    },
+    "/users/{userId}/memberships/{chatId}": {
+      "schema": "UserMembership",
+      "description": "User-specific chat membership index."
+    },
+    "/users/{userId}/wallpaper_configs/{scopeId}": {
+      "schema": "WallpaperConfig",
+      "description": "Global ('global') and per-chat ('{chatId}') wallpaper settings for {userId}."
+    },
+    "/users/{userId}/custom_wallpapers/{wallpaperId}": {
+      "schema": "CustomWallpaper",
+      "description": "Custom uploaded wallpapers owned by {userId}."
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Direct chats, groups, and broadcast channels."
+    },
+    "/chats/{chatId}/members/{memberId}": {
+      "schema": "ChatMember",
+      "description": "Members and their roles (owner, admin, member) inside a chat."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages inside a chat."
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Social feed posts."
+    },
+    "/posts/{postId}/likes/{userId}": {
+      "schema": "PostLike",
+      "description": "Likes on a post."
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": "PostComment",
+      "description": "Comments on a post."
+    },
+    "/calls/{callId}": {
+      "schema": "CallSession",
+      "description": "WebRTC audio/video call signaling sessions."
+    },
+    "/calls/{callId}/candidates/{candidateId}": {
+      "schema": "IceCandidate",
+      "description": "WebRTC ICE candidates for a call."
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Submitted moderation reports."
+    }
+  }
+}

@@ -1,0 +1,299 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #EDEEF0;
+  --bg-deep: #E5E7EB;
+  --ink: #19191A;
+  --accent: #0077FF;
+  --accent-hover: #0066EA;
+  --accent-violet: #2688EB;
+  --panel: #FFFFFF;
+  --panel-elevated: #F7F8FA;
+  --border: #E1E3E6;
+  --muted: #818C99;
+}
+
+body {
+  background-color: var(--bg);
+  background-image: none;
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Roboto", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(0, 119, 255, 0.25);
+  color: #0077FF;
+}
+
+/* Sleek scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(129, 140, 153, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(129, 140, 153, 0.6);
+}
+
+.v7-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  color: #818C99;
+  font-weight: 600;
+}
+
+.v7-panel {
+  background: #FFFFFF;
+  border-radius: 12px;
+  border: 1px solid #E1E3E6;
+  box-shadow: 0 1px 0 0 #DCE1E6, 0 0 0 1px #E7E8EC;
+}
+
+.v7-card-section {
+  border-top: 1px solid #E1E3E6;
+  padding: 16px 0;
+}
+
+.v7-input {
+  width: 100%;
+  background: #FFFFFF;
+  border: 1px solid #E1E3E6;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: #19191A;
+  font-size: 0.88rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.v7-input::placeholder {
+  color: #818C99;
+}
+
+.v7-input:focus {
+  outline: none;
+  border-color: #0077FF;
+  box-shadow: 0 0 0 3px rgba(0, 119, 255, 0.15);
+}
+
+.v7-btn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.v7-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  background: #0077FF;
+  color: #FFFFFF;
+  border: none;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 0.88rem;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 119, 255, 0.2);
+  transition: background-color 0.15s ease, transform 0.12s ease;
+  text-align: left;
+}
+
+.v7-btn:hover:not(:disabled) {
+  background: #0066EA;
+}
+
+.v7-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.v7-btn-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  background: #EDEFEF;
+  color: #2C3138;
+  border: 1px solid transparent;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  text-align: left;
+}
+
+.v7-btn-secondary:hover:not(:disabled) {
+  background: #E2E5E8;
+}
+
+.v7-btn-danger {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  background: #FFEAEA;
+  color: #E64646;
+  border: 1px solid rgba(230, 70, 70, 0.2);
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  text-align: left;
+}
+
+.v7-btn-danger:hover:not(:disabled) {
+  background: #FFDADA;
+}
+
+/* ============================================================================
+   ТЁМНАЯ ВЕРСИЯ ИНТЕРФЕЙСА (body.theme-dark)
+   ============================================================================ */
+body.theme-dark {
+  --bg: #141414;
+  --bg-deep: #0F0F10;
+  --ink: #F2F3F5;
+  --panel: #222226;
+  --panel-elevated: #2C2C31;
+  --border: #333338;
+  --muted: #9CA3AF;
+  background-color: #141414;
+  color: #F2F3F5;
+}
+
+body.theme-dark:not(.theme-custom) .bg-\[\#EDEEF0\],
+body.theme-dark:not(.theme-custom) .bg-\[\#EBEDF0\] {
+  background-color: #141414 !important;
+}
+
+body.theme-dark .bg-white {
+  background-color: #222226 !important;
+}
+
+body.theme-dark .bg-white\/95,
+body.theme-dark .bg-white\/90 {
+  background-color: rgba(34, 34, 38, 0.94) !important;
+}
+
+body.theme-dark .bg-\[\#F7F8FA\],
+body.theme-dark .bg-\[\#F5F6F8\],
+body.theme-dark .bg-\[\#F2F3F5\],
+body.theme-dark .bg-\[\#F0F2F5\],
+body.theme-dark .bg-\[\#EDEFEF\] {
+  background-color: #2C2C31 !important;
+}
+
+body.theme-dark .bg-\[\#E5F1FF\],
+body.theme-dark .bg-\[\#E5EBF1\] {
+  background-color: rgba(0, 119, 255, 0.2) !important;
+}
+
+body.theme-dark .bg-\[\#CCE4FF\] {
+  background-color: #004C99 !important;
+  color: #F2F3F5 !important;
+  border-color: #0066CC !important;
+}
+
+body.theme-dark .border-\[\#E1E3E6\],
+body.theme-dark .border-\[\#DCE1E6\],
+body.theme-dark .border-\[\#F2F3F5\] {
+  border-color: #333338 !important;
+}
+
+body.theme-dark .text-\[\#19191A\],
+body.theme-dark .text-\[\#2C3138\],
+body.theme-dark .text-\[\#000000\] {
+  color: #F2F3F5 !important;
+}
+
+body.theme-dark .text-\[\#626D7A\],
+body.theme-dark .text-\[\#656565\],
+body.theme-dark .text-\[\#818C99\] {
+  color: #9CA3AF !important;
+}
+
+body.theme-dark .text-\[\#2A5885\] {
+  color: #71AAEB !important;
+}
+
+body.theme-dark .v7-panel {
+  background: #222226;
+  border-color: #333338;
+  box-shadow: 0 1px 0 0 #2A2A2E;
+}
+
+body.theme-dark .v7-input {
+  background: #1B1B1F !important;
+  border-color: #36373C !important;
+  color: #F2F3F5 !important;
+}
+
+body.theme-dark .v7-btn-secondary {
+  background: #2C2C31;
+  color: #F2F3F5;
+  border-color: #3A3A40;
+}
+
+body.theme-dark .v7-btn-secondary:hover:not(:disabled) {
+  background: #36363C;
+}
+
+body.theme-dark .v7-btn-danger {
+  background: rgba(230, 70, 70, 0.16);
+  color: #FF6B6B;
+  border-color: rgba(230, 70, 70, 0.3);
+}
+
+/* ============================================================================
+   СВОЙ ВАРИАНТ ОФОРМЛЕНИЯ (body.theme-custom)
+   Позволяет ставить любой свой цвет или свою картинку на фон всего приложения
+   ============================================================================ */
+body.theme-custom {
+  background-color: var(--custom-app-bg, #1E293B) !important;
+  background-image: var(--custom-app-image, none) !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-attachment: fixed !important;
+}
+
+body.theme-custom .bg-\[\#EDEEF0\],
+body.theme-custom .bg-\[\#EBEDF0\] {
+  background-color: transparent !important;
+}
+
+body.theme-custom.custom-cards-light .bg-white {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(12px);
+}
+
+body.theme-custom.custom-cards-dark .bg-white {
+  background-color: rgba(28, 30, 38, 0.9) !important;
+  backdrop-filter: blur(12px);
+}

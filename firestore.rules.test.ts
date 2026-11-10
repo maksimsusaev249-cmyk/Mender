@@ -1,0 +1,228 @@
+/**
+ * Security Rules Verification Suite (Phase 0 TDD — Dirty Dozen Payloads)
+ * Verifies that all 12 adversarial payloads defined in security_spec.md
+ * are rejected with PERMISSION_DENIED by firestore.rules.
+ */
+
+export interface SecurityTestCase {
+  id: number;
+  name: string;
+  collection: string;
+  operation: 'get' | 'list' | 'create' | 'update' | 'delete';
+  authUid: string | null;
+  emailVerified: boolean;
+  docId: string;
+  payload?: Record<string, unknown>;
+  expectedResult: 'PERMISSION_DENIED' | 'ALLOWED';
+}
+
+export const dirtyDozenTestCases: SecurityTestCase[] = [
+  {
+    id: 1,
+    name: 'Identity Spoofing on UserPublic',
+    collection: 'users',
+    operation: 'create',
+    authUid: 'uid_attacker',
+    emailVerified: true,
+    docId: 'uid_victim',
+    payload: {
+      uid: 'uid_victim',
+      displayName: 'Spoofed Name',
+      username: 'spoofed_user',
+      avatarUrl: 'https://example.com/a.png',
+      bio: 'Spoofed',
+      status: 'online',
+      privacyLastSeen: 'everyone',
+      privacyPhoto: 'everyone',
+      privacyCalls: 'everyone',
+      followersCount: 0,
+      followingCount: 0,
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 2,
+    name: 'PII Theft on UserPrivate',
+    collection: 'users_private',
+    operation: 'get',
+    authUid: 'uid_attacker',
+    emailVerified: true,
+    docId: 'uid_victim',
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 3,
+    name: 'Shadow Field Injection on Chat',
+    collection: 'chats',
+    operation: 'create',
+    authUid: 'uid_user',
+    emailVerified: true,
+    docId: 'chat_1',
+    payload: {
+      chatId: 'chat_1',
+      type: 'group',
+      visibility: 'public',
+      name: 'Group',
+      description: 'Desc',
+      avatarUrl: '',
+      ownerId: 'uid_user',
+      peerUserId: 'uid_user',
+      membersCount: 1,
+      lastMessageText: '',
+      lastMessageType: 'text',
+      lastMessageSenderId: 'uid_user',
+      isVerified: true, // Ghost field
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 4,
+    name: 'Orphaned Message Write to Non-Existent Chat',
+    collection: 'chats/non_existent_chat/messages',
+    operation: 'create',
+    authUid: 'uid_user',
+    emailVerified: true,
+    docId: 'msg_1',
+    payload: {
+      messageId: 'msg_1',
+      chatId: 'non_existent_chat',
+      senderId: 'uid_user',
+      senderName: 'User',
+      senderAvatar: '',
+      recipientId: 'uid_user',
+      chatVisibility: 'private',
+      type: 'text',
+      content: 'Hello',
+      mediaUrl: '',
+      duration: 0,
+      status: 'sent',
+      likesCount: 0,
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 5,
+    name: 'Unauthorized Private Chat Read',
+    collection: 'chats',
+    operation: 'get',
+    authUid: 'uid_outsider',
+    emailVerified: true,
+    docId: 'chat_secret',
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 6,
+    name: 'Value Poisoning on Message Update',
+    collection: 'chats/chat_1/messages',
+    operation: 'update',
+    authUid: 'uid_user',
+    emailVerified: true,
+    docId: 'msg_1',
+    payload: {
+      content: 12345, // Invalid type (number instead of string)
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 7,
+    name: 'Privilege Escalation on ChatMember',
+    collection: 'chats/chat_1/members',
+    operation: 'create',
+    authUid: 'uid_attacker',
+    emailVerified: true,
+    docId: 'uid_attacker',
+    payload: {
+      chatId: 'chat_1',
+      userId: 'uid_attacker',
+      role: 'owner', // Attacker trying to claim owner role on someone else's chat
+      displayName: 'Attacker',
+      avatarUrl: '',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 8,
+    name: 'Timestamp Forgery on Post Creation',
+    collection: 'posts',
+    operation: 'create',
+    authUid: 'uid_user',
+    emailVerified: true,
+    docId: 'post_1',
+    payload: {
+      postId: 'post_1',
+      authorId: 'uid_user',
+      authorName: 'User',
+      authorUsername: 'user_1',
+      authorAvatar: '',
+      visibility: 'public',
+      content: 'Forged timestamp',
+      mediaUrl: '',
+      mediaType: 'none',
+      likesCount: 0,
+      commentsCount: 0,
+      createdAt: '2020-01-01T00:00:00Z',
+      updatedAt: '2020-01-01T00:00:00Z',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 9,
+    name: 'Immortal Field Mutation on Post Update',
+    collection: 'posts',
+    operation: 'update',
+    authUid: 'uid_user',
+    emailVerified: true,
+    docId: 'post_1',
+    payload: {
+      authorId: 'uid_another',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 10,
+    name: 'Terminal State Mutation on CallSession',
+    collection: 'calls',
+    operation: 'update',
+    authUid: 'uid_user',
+    emailVerified: true,
+    docId: 'call_ended_1',
+    payload: {
+      status: 'connected',
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 11,
+    name: 'Unverified User Write Attempt',
+    collection: 'posts',
+    operation: 'create',
+    authUid: 'uid_unverified',
+    emailVerified: false,
+    docId: 'post_2',
+    payload: {
+      postId: 'post_2',
+      authorId: 'uid_unverified',
+      authorName: 'Unverified',
+      authorUsername: 'unverified',
+      authorAvatar: '',
+      visibility: 'public',
+      content: 'Hello',
+      mediaUrl: '',
+      mediaType: 'none',
+      likesCount: 0,
+      commentsCount: 0,
+    },
+    expectedResult: 'PERMISSION_DENIED',
+  },
+  {
+    id: 12,
+    name: 'ID Poisoning Attack with Invalid Characters',
+    collection: 'posts',
+    operation: 'create',
+    authUid: 'uid_user',
+    emailVerified: true,
+    docId: 'invalid id with spaces!@#',
+    payload: {},
+    expectedResult: 'PERMISSION_DENIED',
+  },
+];
