@@ -400,7 +400,7 @@
         "reportId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "reporterId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "targetId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
-        "targetType": { "type": "string", "enum": ["user", "chat", "post", "message"] },
+        "targetType": { "type": "string", "enum": ["user", "chat", "post", "message", "video", "video_comment"] },
         "reason": { "type": "string", "minLength": 3, "maxLength": 1000 },
         "status": { "type": "string", "enum": ["open", "resolved"] },
         "createdAt": { "type": "string", "format": "date-time" }
@@ -444,6 +444,183 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["folderId", "userId", "name", "postIds"]
+    },
+    "MenderVideo": {
+      "title": "MenderVideo",
+      "description": "Published or draft video in Mender Video with cover, hashtags, category, and real metrics.",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "authorUsername": { "type": "string", "minLength": 3, "maxLength": 40 },
+        "authorAvatar": { "type": "string", "maxLength": 2000 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 150 },
+        "description": { "type": "string", "maxLength": 4000 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "hashtags": { "type": "array" },
+        "videoUrl": { "type": "string", "minLength": 1, "maxLength": 900000 },
+        "thumbnailUrl": { "type": "string", "maxLength": 800000 },
+        "duration": { "type": "integer" },
+        "sizeBytes": { "type": "integer" },
+        "mimeType": { "type": "string", "maxLength": 64 },
+        "status": { "type": "string", "enum": ["draft", "published"] },
+        "visibility": { "type": "string", "enum": ["public", "private"] },
+        "viewsCount": { "type": "integer" },
+        "likesCount": { "type": "integer" },
+        "commentsCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "videoId",
+        "authorId",
+        "authorName",
+        "authorUsername",
+        "authorAvatar",
+        "title",
+        "description",
+        "category",
+        "hashtags",
+        "videoUrl",
+        "thumbnailUrl",
+        "duration",
+        "sizeBytes",
+        "mimeType",
+        "status",
+        "visibility",
+        "viewsCount",
+        "likesCount",
+        "commentsCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MenderVideoView": {
+      "title": "MenderVideoView",
+      "description": "Deduplicated unique view record for a video by a viewer.",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "viewerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["videoId", "viewerId", "createdAt"]
+    },
+    "MenderVideoLike": {
+      "title": "MenderVideoLike",
+      "description": "User like on a Mender Video.",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["videoId", "userId", "createdAt"]
+    },
+    "MenderVideoComment": {
+      "title": "MenderVideoComment",
+      "description": "Threaded comment or reply on a Mender Video.",
+      "type": "object",
+      "properties": {
+        "commentId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "videoId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "authorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "authorUsername": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "authorAvatar": { "type": "string", "maxLength": 2000 },
+        "content": { "type": "string", "minLength": 1, "maxLength": 1500 },
+        "parentCommentId": { "type": "string", "maxLength": 128 },
+        "replyToAuthorName": { "type": "string", "maxLength": 80 },
+        "likesCount": { "type": "integer" },
+        "likedByUserIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "commentId",
+        "videoId",
+        "authorId",
+        "authorName",
+        "authorUsername",
+        "authorAvatar",
+        "content",
+        "parentCommentId",
+        "replyToAuthorName",
+        "likesCount",
+        "likedByUserIds",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "VideoPlaylist": {
+      "title": "VideoPlaylist",
+      "description": "User-created public or private video playlist.",
+      "type": "object",
+      "properties": {
+        "playlistId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "ownerUsername": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "ownerAvatar": { "type": "string", "maxLength": 2000 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "visibility": { "type": "string", "enum": ["public", "private"] },
+        "videoIds": { "type": "array" },
+        "coverUrl": { "type": "string", "maxLength": 800000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "playlistId",
+        "ownerId",
+        "ownerName",
+        "ownerUsername",
+        "ownerAvatar",
+        "title",
+        "description",
+        "visibility",
+        "videoIds",
+        "coverUrl",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "VideoNotification": {
+      "title": "VideoNotification",
+      "description": "Real-time notification for new subscribers, comments, replies, and likes.",
+      "type": "object",
+      "properties": {
+        "notificationId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "recipientId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "actorName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "actorUsername": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "actorAvatar": { "type": "string", "maxLength": 2000 },
+        "type": {
+          "type": "string",
+          "enum": ["new_subscriber", "video_like", "new_comment", "comment_reply", "comment_like"]
+        },
+        "videoId": { "type": "string", "maxLength": 128 },
+        "videoTitle": { "type": "string", "maxLength": 150 },
+        "commentText": { "type": "string", "maxLength": 300 },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "notificationId",
+        "recipientId",
+        "actorId",
+        "actorName",
+        "actorUsername",
+        "actorAvatar",
+        "type",
+        "videoId",
+        "videoTitle",
+        "commentText",
+        "isRead",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -483,6 +660,10 @@
       "schema": "UserSession",
       "description": "Active device login sessions for {userId}."
     },
+    "/users/{userId}/video_notifications/{notificationId}": {
+      "schema": "VideoNotification",
+      "description": "Notifications for {userId} about new subscribers, video comments, replies, and likes."
+    },
     "/chats/{chatId}": {
       "schema": "Chat",
       "description": "Direct chats, groups, and broadcast channels."
@@ -507,6 +688,26 @@
       "schema": "PostComment",
       "description": "Comments on a post."
     },
+    "/mender_videos/{videoId}": {
+      "schema": "MenderVideo",
+      "description": "Mender Video publications and drafts."
+    },
+    "/mender_videos/{videoId}/views/{viewerId}": {
+      "schema": "MenderVideoView",
+      "description": "Unique view records per viewer to prevent duplicate view inflation."
+    },
+    "/mender_videos/{videoId}/likes/{userId}": {
+      "schema": "MenderVideoLike",
+      "description": "Likes on a Mender Video."
+    },
+    "/mender_videos/{videoId}/comments/{commentId}": {
+      "schema": "MenderVideoComment",
+      "description": "Threaded comments and replies on a Mender Video."
+    },
+    "/video_playlists/{playlistId}": {
+      "schema": "VideoPlaylist",
+      "description": "Public and private video playlists."
+    },
     "/calls/{callId}": {
       "schema": "CallSession",
       "description": "WebRTC audio/video call signaling sessions."
@@ -521,4 +722,5 @@
     }
   }
 }
+
 

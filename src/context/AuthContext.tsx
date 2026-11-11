@@ -160,7 +160,11 @@ interface AuthContextType {
   isUserBlocked: (targetUid: string) => boolean;
   toggleSubscription: (targetId: string, targetType: 'user' | 'channel') => Promise<void>;
   isSubscribed: (targetId: string) => boolean;
-  submitReport: (targetId: string, targetType: 'user' | 'chat' | 'post' | 'message', reason: string) => Promise<void>;
+  submitReport: (
+    targetId: string,
+    targetType: 'user' | 'chat' | 'post' | 'message' | 'video' | 'video_comment',
+    reason: string
+  ) => Promise<void>;
   userSessions: UserSessionDoc[];
   currentSessionId: string;
   terminateSession: (sessionId: string) => Promise<void>;
@@ -1801,6 +1805,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!firebaseUser || !profile) return;
     const uid = firebaseUser.uid;
     const cleanTarget = sanitizeId(targetId);
+    if (targetType === 'user' && cleanTarget === uid) return;
+
     const subRef = doc(db, 'users', uid, 'subscriptions', cleanTarget);
     const userRef = doc(db, 'users', uid);
 
@@ -1826,6 +1832,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
       await batch.commit();
+
+      // Update target user's followersCount & send real notification if targetType === 'user'
+      if (targetType === 'user' && cleanTarget !== uid) {
+        try {
+          const targetRef = doc(db, 'users', cleanTarget);
+          const targetSnap = await getDoc(targetRef);
+          if (targetSnap.exists()) {
+            const targetData = targetSnap.data() as UserPublic;
+            const currentFollowers = Math.max(0, targetData.followersCount || 0);
+            const nextFollowers = existingSub
+              ? Math.max(0, currentFollowers - 1)
+              : currentFollowers + 1;
+            await updateDoc(targetRef, {
+              followersCount: nextFollowers,
+              updatedAt: serverTimestamp(),
+            });
+
+            if (!existingSub) {
+              const notifId = sanitizeId(`vnotif_sub_${uid}_${Date.now()}`);
+              await setDoc(doc(db, 'users', cleanTarget, 'video_notifications', notifId), {
+                notificationId: notifId,
+                recipientId: cleanTarget,
+                actorId: uid,
+                actorName: profile.displayName.slice(0, 80),
+                actorUsername: profile.username.slice(0, 40),
+                actorAvatar: profile.avatarUrl.slice(0, 2000),
+                type: 'new_subscriber',
+                videoId: '',
+                videoTitle: '',
+                commentText: '',
+                isRead: false,
+                createdAt: serverTimestamp(),
+              });
+            }
+          }
+        } catch {
+          // non-critical if target doc doesn't exist
+        }
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `users/${uid}/subscriptions/${cleanTarget}`);
     }
@@ -1833,7 +1878,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const submitReport = async (
     targetId: string,
-    targetType: 'user' | 'chat' | 'post' | 'message',
+    targetType: 'user' | 'chat' | 'post' | 'message' | 'video' | 'video_comment',
     reason: string
   ) => {
     if (!firebaseUser) return;

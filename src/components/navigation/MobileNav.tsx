@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useChat } from '../../context/ChatContext';
 import { useAuth } from '../../context/AuthContext';
-import { MessageSquare, Users, Plus, Newspaper, User } from 'lucide-react';
+import { MessageSquare, Users, Plus, Newspaper, User, Film } from 'lucide-react';
 import { CreateGroupModal } from '../chats/CreateGroupModal';
 
 export const MobileNav: React.FC = () => {
@@ -33,6 +33,21 @@ export const MobileNav: React.FC = () => {
         >
           <Newspaper className="w-5 h-5 mb-0.5" />
           <span className="text-[10px] tracking-tight">Новости</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('video')}
+          className={`flex flex-col items-center justify-center flex-1 h-full transition-colors cursor-pointer ${
+            activeTab === 'video'
+              ? 'text-[#0077FF] font-semibold'
+              : isDarkMode
+              ? 'text-[#828385]'
+              : 'text-[#818C99] hover:text-[#19191A]'
+          }`}
+        >
+          <Film className="w-5 h-5 mb-0.5" />
+          <span className="text-[10px] tracking-tight">Видео</span>
         </button>
 
         <button

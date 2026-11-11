@@ -320,6 +320,9 @@ service cloud.firestore {
       && data.keys().hasOnly([
         'callId', 'chatId', 'callerId', 'callerName', 'callerAvatar',
         'calleeId', 'type', 'status', 'isScreenSharing',
+        'callerVideoEnabled', 'calleeVideoEnabled',
+        'callerScreenSharing', 'calleeScreenSharing',
+        'offerSenderId', 'screenShareSurface',
         'offerSdp', 'offerType', 'answerSdp', 'answerType',
         'createdAt', 'updatedAt'
       ])
@@ -332,6 +335,12 @@ service cloud.firestore {
       && data.type is string && data.type.size() <= 20 && data.type in ['audio', 'video']
       && data.status is string && data.status.size() <= 20 && data.status in ['ringing', 'connected', 'ended']
       && data.isScreenSharing is bool
+      && (!('callerVideoEnabled' in data) || data.callerVideoEnabled is bool)
+      && (!('calleeVideoEnabled' in data) || data.calleeVideoEnabled is bool)
+      && (!('callerScreenSharing' in data) || data.callerScreenSharing is bool)
+      && (!('calleeScreenSharing' in data) || data.calleeScreenSharing is bool)
+      && (!('offerSenderId' in data) || isValidId(data.offerSenderId))
+      && (!('screenShareSurface' in data) || (data.screenShareSurface is string && data.screenShareSurface.size() <= 20 && data.screenShareSurface in ['monitor', 'window', 'browser']))
       && data.offerSdp is string && data.offerSdp.size() <= 30000
       && data.offerType is string && data.offerType.size() <= 20
       && data.answerSdp is string && data.answerSdp.size() <= 30000
@@ -373,7 +382,7 @@ service cloud.firestore {
       && isValidId(data.reporterId)
       && isOwner(data.reporterId)
       && isValidId(data.targetId)
-      && data.targetType is string && data.targetType.size() <= 20 && data.targetType in ['user', 'chat', 'post', 'message']
+      && data.targetType is string && data.targetType.size() <= 20 && data.targetType in ['user', 'chat', 'post', 'message', 'video', 'video_comment']
       && data.reason is string && data.reason.size() >= 3 && data.reason.size() <= 1000
       && data.status is string && data.status.size() <= 20 && data.status in ['open', 'resolved']
       && data.createdAt is timestamp;
@@ -399,6 +408,138 @@ service cloud.firestore {
       && (!('updatedAt' in data) || data.updatedAt is timestamp);
     }
 
+    function isValidMenderVideo(data) {
+      return data.keys().hasAll([
+        'videoId', 'authorId', 'authorName', 'authorUsername', 'authorAvatar',
+        'title', 'description', 'category', 'hashtags',
+        'videoUrl', 'thumbnailUrl', 'duration', 'sizeBytes', 'mimeType',
+        'status', 'visibility', 'viewsCount', 'likesCount', 'commentsCount',
+        'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'videoId', 'authorId', 'authorName', 'authorUsername', 'authorAvatar',
+        'title', 'description', 'category', 'hashtags',
+        'videoUrl', 'thumbnailUrl', 'duration', 'sizeBytes', 'mimeType',
+        'status', 'visibility', 'viewsCount', 'likesCount', 'commentsCount',
+        'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.videoId)
+      && isValidId(data.authorId)
+      && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80
+      && data.authorUsername is string && data.authorUsername.size() >= 1 && data.authorUsername.size() <= 40
+      && data.authorAvatar is string && data.authorAvatar.size() <= 2000
+      && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+      && data.description is string && data.description.size() <= 5000
+      && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+      && data.hashtags is list && data.hashtags.size() <= 25
+      && data.videoUrl is string && data.videoUrl.size() >= 5 && data.videoUrl.size() <= 2000000
+      && data.thumbnailUrl is string && data.thumbnailUrl.size() <= 1000000
+      && (data.duration is int || data.duration is float) && data.duration >= 0
+      && data.sizeBytes is int && data.sizeBytes >= 0
+      && data.mimeType is string && data.mimeType.size() >= 3 && data.mimeType.size() <= 64
+      && data.status is string && data.status.size() <= 20 && data.status in ['published', 'draft']
+      && data.visibility is string && data.visibility.size() <= 20 && data.visibility in ['public', 'private']
+      && data.viewsCount is int && data.viewsCount >= 0
+      && data.likesCount is int && data.likesCount >= 0
+      && data.commentsCount is int && data.commentsCount >= 0
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidMenderVideoView(data) {
+      return data.keys().hasAll(['videoId', 'viewerId', 'createdAt'])
+      && data.keys().hasOnly(['videoId', 'viewerId', 'createdAt'])
+      && isValidId(data.videoId)
+      && isValidId(data.viewerId)
+      && isOwner(data.viewerId)
+      && data.createdAt is timestamp;
+    }
+
+    function isValidMenderVideoLike(data) {
+      return data.keys().hasAll(['videoId', 'userId', 'createdAt'])
+      && data.keys().hasOnly(['videoId', 'userId', 'createdAt'])
+      && isValidId(data.videoId)
+      && isValidId(data.userId)
+      && isOwner(data.userId)
+      && data.createdAt is timestamp;
+    }
+
+    function isValidMenderVideoComment(data) {
+      return data.keys().hasAll([
+        'commentId', 'videoId', 'authorId', 'authorName', 'authorUsername', 'authorAvatar',
+        'content', 'parentCommentId', 'replyToAuthorName',
+        'likesCount', 'likedByUserIds', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'commentId', 'videoId', 'authorId', 'authorName', 'authorUsername', 'authorAvatar',
+        'content', 'parentCommentId', 'replyToAuthorName',
+        'likesCount', 'likedByUserIds', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.commentId)
+      && isValidId(data.videoId)
+      && isValidId(data.authorId)
+      && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80
+      && data.authorUsername is string && data.authorUsername.size() >= 1 && data.authorUsername.size() <= 40
+      && data.authorAvatar is string && data.authorAvatar.size() <= 2000
+      && data.parentCommentId is string && data.parentCommentId.size() <= 128
+      && data.replyToAuthorName is string && data.replyToAuthorName.size() <= 120
+      && data.content is string && data.content.size() >= 1 && data.content.size() <= 2000
+      && data.likesCount is int && data.likesCount >= 0
+      && data.likedByUserIds is list && data.likedByUserIds.size() <= 2000
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidVideoPlaylist(data) {
+      return data.keys().hasAll([
+        'playlistId', 'ownerId', 'ownerName', 'ownerUsername', 'ownerAvatar',
+        'title', 'description', 'visibility',
+        'videoIds', 'coverUrl', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'playlistId', 'ownerId', 'ownerName', 'ownerUsername', 'ownerAvatar',
+        'title', 'description', 'visibility',
+        'videoIds', 'coverUrl', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.playlistId)
+      && isValidId(data.ownerId)
+      && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80
+      && data.ownerUsername is string && data.ownerUsername.size() >= 1 && data.ownerUsername.size() <= 40
+      && data.ownerAvatar is string && data.ownerAvatar.size() <= 2000
+      && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+      && data.description is string && data.description.size() <= 1000
+      && data.visibility is string && data.visibility.size() <= 20 && data.visibility in ['public', 'private']
+      && data.videoIds is list && data.videoIds.size() <= 500
+      && data.coverUrl is string && data.coverUrl.size() <= 1000000
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidVideoNotification(data) {
+      return data.keys().hasAll([
+        'notificationId', 'recipientId', 'actorId', 'actorName', 'actorUsername', 'actorAvatar',
+        'type', 'videoId', 'videoTitle', 'commentText', 'isRead', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'notificationId', 'recipientId', 'actorId', 'actorName', 'actorUsername', 'actorAvatar',
+        'type', 'videoId', 'videoTitle', 'commentText', 'isRead', 'createdAt'
+      ])
+      && isValidId(data.notificationId)
+      && isValidId(data.recipientId)
+      && isValidId(data.actorId)
+      && data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 80
+      && data.actorUsername is string && data.actorUsername.size() >= 1 && data.actorUsername.size() <= 40
+      && data.actorAvatar is string && data.actorAvatar.size() <= 2000
+      && data.type is string && data.type.size() <= 32 && data.type in [
+        'new_subscriber', 'video_like', 'new_comment', 'comment_reply', 'comment_like'
+      ]
+      && data.videoId is string && data.videoId.size() <= 128
+      && data.videoTitle is string && data.videoTitle.size() <= 200
+      && data.commentText is string && data.commentText.size() <= 500
+      && data.isRead is bool
+      && data.createdAt is timestamp;
+    }
+
     // =========================================================================
     // 3. COLLECTION RULES
     // =========================================================================
@@ -419,20 +560,23 @@ service cloud.firestore {
 
       allow update: if isVerified()
         && isValidId(userId)
-        && isOwner(userId)
         && isValidUserPublic(incoming())
         && incoming().uid == existing().uid
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          incoming().diff(existing()).affectedKeys().hasOnly([
-            'displayName', 'username', 'avatarUrl', 'bio', 'status',
-            'privacyLastSeen', 'privacyPhoto', 'privacyCalls', 'updatedAt'
-          ])
+          (isOwner(userId) && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'username', 'avatarUrl', 'bio', 'status',
+              'privacyLastSeen', 'privacyPhoto', 'privacyCalls', 'updatedAt'
+            ])
+            ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+            ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['followingCount', 'updatedAt'])
+          ))
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
-          ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['followingCount', 'updatedAt'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
         );
 
       allow delete: if false;
@@ -607,6 +751,40 @@ service cloud.firestore {
           && isValidId(userId)
           && isValidId(sessionId)
           && isOwner(userId);
+      }
+
+      match /video_notifications/{notificationId} {
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(notificationId) && isOwner(userId);
+        allow list: if isSignedIn() && isOwner(userId) && isOwner(existing().recipientId);
+
+        allow create: if isVerified()
+          && isValidId(userId)
+          && isValidId(notificationId)
+          && isValidVideoNotification(incoming())
+          && incoming().notificationId == notificationId
+          && incoming().recipientId == userId
+          && isOwner(incoming().actorId)
+          && incoming().isRead == false
+          && incoming().createdAt == request.time;
+
+        allow update: if isVerified()
+          && isValidId(userId)
+          && isValidId(notificationId)
+          && isOwner(userId)
+          && isValidVideoNotification(incoming())
+          && incoming().notificationId == existing().notificationId
+          && incoming().recipientId == existing().recipientId
+          && incoming().actorId == existing().actorId
+          && incoming().type == existing().type
+          && incoming().videoId == existing().videoId
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+
+        allow delete: if isVerified()
+          && isValidId(userId)
+          && isValidId(notificationId)
+          && isOwner(userId)
+          && isOwner(existing().recipientId);
       }
     }
 
@@ -920,13 +1098,11 @@ service cloud.firestore {
         && incoming().type == existing().type
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && (
-          incoming().diff(existing()).affectedKeys().hasOnly(['answerSdp', 'answerType', 'status', 'updatedAt'])
-          ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['isScreenSharing', 'offerSdp', 'offerType', 'answerSdp', 'answerType', 'updatedAt'])
-          ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'isScreenSharing', 'updatedAt'])
-        );
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'isScreenSharing', 'callerVideoEnabled', 'calleeVideoEnabled',
+          'callerScreenSharing', 'calleeScreenSharing', 'offerSenderId',
+          'screenShareSurface', 'offerSdp', 'offerType', 'answerSdp', 'answerType', 'updatedAt'
+        ]);
 
       allow delete: if false;
 
@@ -970,6 +1146,159 @@ service cloud.firestore {
         && incoming().createdAt == request.time;
 
       allow update, delete: if false;
+    }
+
+    match /mender_videos/{videoId} {
+      allow get: if isSignedIn()
+        && isValidId(videoId)
+        && (existing().visibility == 'public' || isOwner(existing().authorId));
+
+      allow list: if isSignedIn()
+        && (existing().visibility == 'public' || isOwner(existing().authorId));
+
+      allow create: if isVerified()
+        && isValidId(videoId)
+        && isValidMenderVideo(incoming())
+        && incoming().videoId == videoId
+        && isOwner(incoming().authorId)
+        && incoming().viewsCount == 0
+        && incoming().likesCount == 0
+        && incoming().commentsCount == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(videoId)
+        && isValidMenderVideo(incoming())
+        && incoming().videoId == existing().videoId
+        && incoming().authorId == existing().authorId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isOwner(existing().authorId) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'description', 'category', 'hashtags', 'videoUrl',
+            'thumbnailUrl', 'duration', 'sizeBytes', 'mimeType',
+            'status', 'visibility', 'updatedAt'
+          ]))
+          ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount', 'updatedAt'])
+          ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt'])
+          ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'updatedAt'])
+        );
+
+      allow delete: if isVerified()
+        && isValidId(videoId)
+        && isOwner(existing().authorId);
+
+      match /views/{viewerId} {
+        allow get: if isSignedIn() && isValidId(videoId) && isValidId(viewerId);
+        allow list: if isSignedIn() && existing().videoId == videoId && isOwner(existing().viewerId);
+
+        allow create: if isVerified()
+          && isValidId(videoId)
+          && isValidId(viewerId)
+          && isOwner(viewerId)
+          && isValidMenderVideoView(incoming())
+          && incoming().videoId == videoId
+          && incoming().viewerId == viewerId
+          && incoming().createdAt == request.time;
+
+        allow update, delete: if false;
+      }
+
+      match /likes/{likeUserId} {
+        allow get: if isSignedIn() && isValidId(videoId) && isValidId(likeUserId);
+        allow list: if isSignedIn() && existing().videoId == videoId && isOwner(existing().userId);
+
+        allow create: if isVerified()
+          && isValidId(videoId)
+          && isValidId(likeUserId)
+          && isOwner(likeUserId)
+          && isValidMenderVideoLike(incoming())
+          && incoming().videoId == videoId
+          && incoming().userId == likeUserId
+          && incoming().createdAt == request.time;
+
+        allow update: if false;
+
+        allow delete: if isVerified()
+          && isValidId(videoId)
+          && isValidId(likeUserId)
+          && isOwner(likeUserId);
+      }
+
+      match /comments/{commentId} {
+        allow get: if isSignedIn()
+          && isValidId(videoId)
+          && isValidId(commentId)
+          && existing().videoId == videoId;
+
+        allow list: if isSignedIn()
+          && existing().videoId == videoId;
+
+        allow create: if isVerified()
+          && isValidId(videoId)
+          && isValidId(commentId)
+          && isValidMenderVideoComment(incoming())
+          && incoming().commentId == commentId
+          && incoming().videoId == videoId
+          && isOwner(incoming().authorId)
+          && incoming().likesCount == 0
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+
+        allow update: if isVerified()
+          && isValidId(videoId)
+          && isValidId(commentId)
+          && isValidMenderVideoComment(incoming())
+          && incoming().commentId == existing().commentId
+          && incoming().videoId == existing().videoId
+          && incoming().authorId == existing().authorId
+          && incoming().parentCommentId == existing().parentCommentId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedByUserIds', 'updatedAt']);
+
+        allow delete: if isVerified()
+          && isValidId(videoId)
+          && isValidId(commentId)
+          && isOwner(existing().authorId);
+      }
+    }
+
+    match /video_playlists/{playlistId} {
+      allow get: if isSignedIn()
+        && isValidId(playlistId)
+        && (existing().visibility == 'public' || isOwner(existing().ownerId));
+
+      allow list: if isSignedIn()
+        && (existing().visibility == 'public' || isOwner(existing().ownerId));
+
+      allow create: if isVerified()
+        && isValidId(playlistId)
+        && isValidVideoPlaylist(incoming())
+        && incoming().playlistId == playlistId
+        && isOwner(incoming().ownerId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(playlistId)
+        && isOwner(existing().ownerId)
+        && isValidVideoPlaylist(incoming())
+        && incoming().playlistId == existing().playlistId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'description', 'visibility', 'videoIds', 'coverUrl', 'updatedAt'
+        ]);
+
+      allow delete: if isVerified()
+        && isValidId(playlistId)
+        && isOwner(existing().ownerId);
     }
   }
 }

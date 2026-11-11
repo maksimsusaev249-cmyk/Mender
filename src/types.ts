@@ -196,6 +196,13 @@ export interface PostComment {
   createdAt?: any;
 }
 
+export interface ScreenShareOptions {
+  surface: 'monitor' | 'window' | 'browser';
+  resolution: '1080p' | '720p';
+  fps: 30 | 60;
+  includeSystemAudio: boolean;
+}
+
 export interface CallSession {
   callId: string;
   chatId: string;
@@ -206,6 +213,12 @@ export interface CallSession {
   type: 'audio' | 'video';
   status: 'ringing' | 'connected' | 'ended';
   isScreenSharing: boolean;
+  callerVideoEnabled?: boolean;
+  calleeVideoEnabled?: boolean;
+  callerScreenSharing?: boolean;
+  calleeScreenSharing?: boolean;
+  offerSenderId?: string;
+  screenShareSurface?: 'monitor' | 'window' | 'browser';
   offerSdp: string;
   offerType: string;
   answerSdp: string;
@@ -229,7 +242,7 @@ export interface ReportDoc {
   reportId: string;
   reporterId: string;
   targetId: string;
-  targetType: 'user' | 'chat' | 'post' | 'message';
+  targetType: 'user' | 'chat' | 'post' | 'message' | 'video' | 'video_comment';
   reason: string;
   status: 'open' | 'resolved';
   createdAt?: any;
@@ -254,4 +267,106 @@ export interface UserSessionDoc {
   lastActiveAt?: any;
   createdAt?: any;
 }
+
+export type VideoCategory =
+  | 'Технологии и IT'
+  | 'Музыка'
+  | 'Игры'
+  | 'Образование'
+  | 'Развлечения'
+  | 'Спорт'
+  | 'Наука'
+  | 'Путешествия'
+  | 'Творчество'
+  | 'Блоги';
+
+export interface MenderVideo {
+  videoId: string;
+  authorId: string;
+  authorName: string;
+  authorUsername: string;
+  authorAvatar: string;
+  title: string;
+  description: string;
+  category: string;
+  hashtags: string[];
+  videoUrl: string;
+  thumbnailUrl: string;
+  duration: number; // in seconds
+  sizeBytes: number;
+  mimeType: string;
+  status: 'draft' | 'published';
+  visibility: VisibilityType;
+  viewsCount: number;
+  likesCount: number;
+  commentsCount: number;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface MenderVideoView {
+  videoId: string;
+  viewerId: string;
+  createdAt?: any;
+}
+
+export interface MenderVideoLike {
+  videoId: string;
+  userId: string;
+  createdAt?: any;
+}
+
+export interface MenderVideoComment {
+  commentId: string;
+  videoId: string;
+  authorId: string;
+  authorName: string;
+  authorUsername: string;
+  authorAvatar: string;
+  content: string;
+  parentCommentId: string; // '' if top-level comment, otherwise parent commentId
+  replyToAuthorName: string;
+  likesCount: number;
+  likedByUserIds: string[];
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface VideoPlaylist {
+  playlistId: string;
+  ownerId: string;
+  ownerName: string;
+  ownerUsername: string;
+  ownerAvatar: string;
+  title: string;
+  description: string;
+  visibility: VisibilityType;
+  videoIds: string[];
+  coverUrl: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export type VideoNotificationType =
+  | 'new_subscriber'
+  | 'video_like'
+  | 'new_comment'
+  | 'comment_reply'
+  | 'comment_like';
+
+export interface VideoNotification {
+  notificationId: string;
+  recipientId: string;
+  actorId: string;
+  actorName: string;
+  actorUsername: string;
+  actorAvatar: string;
+  type: VideoNotificationType;
+  videoId: string;
+  videoTitle: string;
+  commentText: string;
+  isRead: boolean;
+  createdAt?: any;
+}
+
 

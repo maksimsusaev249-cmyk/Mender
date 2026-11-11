@@ -25,6 +25,7 @@ import {
   UserPublic,
   UserMembership,
   CallSession,
+  ScreenShareOptions,
   IceCandidateDoc,
   VisibilityType,
   WallpaperConfig,
@@ -92,7 +93,7 @@ interface ChatContextType {
   postComments: Record<string, PostComment[]>;
   commentLikesByMe: Record<string, boolean>;
   commentLikesCount: Record<string, number>;
-  activeTab: 'chats' | 'feed' | 'calls' | 'channels' | 'settings';
+  activeTab: 'chats' | 'feed' | 'video' | 'calls' | 'channels' | 'settings';
   searchQuery: string;
   // Wallpapers state & actions
   wallpaperConfigs: Record<string, WallpaperConfig>;
@@ -114,15 +115,19 @@ interface ChatContextType {
   incomingCall: CallSession | null;
   callHistory: CallSession[];
   localStream: MediaStream | null;
+  localCameraStream: MediaStream | null;
+  localScreenStream: MediaStream | null;
   remoteStream: MediaStream | null;
   isAudioMuted: boolean;
   isVideoMuted: boolean;
   isScreenSharing: boolean;
   isSpeakerOn: boolean;
   cameraFacingMode: 'user' | 'environment';
+  availableCameras: MediaDeviceInfo[];
+  selectedCameraId: string;
   groupCallParticipants: GroupCallParticipant[];
   // Actions
-  setActiveTab: (tab: 'chats' | 'feed' | 'calls' | 'channels' | 'settings') => void;
+  setActiveTab: (tab: 'chats' | 'feed' | 'video' | 'calls' | 'channels' | 'settings') => void;
   setActiveChatId: (chatId: string | null) => void;
   setSearchQuery: (q: string) => void;
   startDirectChatWithUser: (peerUser: UserPublic) => Promise<string>;
@@ -196,8 +201,11 @@ interface ChatContextType {
   declineOrEndCall: () => Promise<void>;
   toggleMuteAudio: () => void;
   toggleMuteVideo: () => Promise<void>;
-  toggleScreenShare: () => Promise<void>;
-  switchCamera: () => Promise<void>;
+  toggleScreenShare: (options?: ScreenShareOptions) => Promise<void>;
+  startScreenShare: (options?: ScreenShareOptions) => Promise<boolean>;
+  stopScreenShare: () => Promise<void>;
+  switchCamera: (targetDeviceId?: string) => Promise<void>;
+  refreshAvailableCameras: () => Promise<void>;
   toggleSpeakerphone: () => void;
 }
 
@@ -259,7 +267,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const [activeTab, setActiveTab] = useState<'chats' | 'feed' | 'calls' | 'channels' | 'settings'>('chats');
+  const [activeTab, setActiveTab] = useState<'chats' | 'feed' | 'video' | 'calls' | 'channels' | 'settings'>('chats');
   const [searchQuery, setSearchQuery] = useState('');
   const [myProfileFolders, setMyProfileFolders] = useState<ProfileFolder[]>([]);
   const [viewedUserProfile, setViewedUserProfile] = useState<UserPublic | null>(null);
@@ -270,21 +278,42 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [incomingCall, setIncomingCall] = useState<CallSession | null>(null);
   const [callHistory, setCallHistory] = useState<CallSession[]>([]);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
+  const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoMuted, setIsVideoMuted] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [cameraFacingMode, setCameraFacingMode] = useState<'user' | 'environment'>('user');
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState<string>('');
   const [groupCallParticipants, setGroupCallParticipants] = useState<GroupCallParticipant[]>([]);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const activeCallRef = useRef<CallSession | null>(null);
+  const isVideoMutedRef = useRef<boolean>(false);
+  const isScreenSharingRef = useRef<boolean>(false);
   const commentUnsubsRef = useRef<Record<string, () => void>>({});
   const callUnsubRef = useRef<(() => void) | null>(null);
   const candidatesUnsubRef = useRef<(() => void) | null>(null);
   const groupCallUnsubsRef = useRef<(() => void)[]>([]);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+
+  useEffect(() => {
+    activeCallRef.current = activeCall;
+  }, [activeCall]);
+
+  useEffect(() => {
+    isVideoMutedRef.current = isVideoMuted;
+  }, [isVideoMuted]);
+
+  useEffect(() => {
+    isScreenSharingRef.current = isScreenSharing;
+  }, [isScreenSharing]);
 
   useEffect(() => {
     if (!isAuthReady || !firebaseUser || !profile) {
@@ -2074,6 +2103,24 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // WebRTC Calls
+  const refreshAvailableCameras = useCallback(async () => {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter(d => d.kind === 'videoinput');
+      setAvailableCameras(videoInputs);
+      const currentCamTrack = cameraStreamRef.current?.getVideoTracks()[0];
+      const activeDeviceId = currentCamTrack?.getSettings?.().deviceId;
+      if (activeDeviceId) {
+        setSelectedCameraId(activeDeviceId);
+      } else if (videoInputs[0]?.deviceId && !selectedCameraId) {
+        setSelectedCameraId(videoInputs[0].deviceId);
+      }
+    } catch {
+      // ignore enumeration errors
+    }
+  }, [selectedCameraId]);
+
   const cleanupCallResources = useCallback(() => {
     if (callUnsubRef.current) {
       callUnsubRef.current();
@@ -2096,39 +2143,68 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       peerConnectionRef.current = null;
     }
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => {
+        t.onended = null;
+        t.stop();
+      });
+      screenStreamRef.current = null;
+    }
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach(t => t.stop());
+      cameraStreamRef.current = null;
+    }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop());
       localStreamRef.current = null;
     }
     setLocalStream(null);
+    setLocalCameraStream(null);
+    setLocalScreenStream(null);
     setRemoteStream(null);
     setActiveCall(null);
+    activeCallRef.current = null;
     setGroupCallParticipants([]);
     setIsAudioMuted(false);
     setIsVideoMuted(false);
+    isVideoMutedRef.current = false;
     setIsScreenSharing(false);
+    isScreenSharingRef.current = false;
   }, []);
 
   const acquireMediaStreamSafe = async (
     wantVideo: boolean,
-    facingMode: 'user' | 'environment' = 'user'
+    facingMode: 'user' | 'environment' = 'user',
+    deviceId?: string
   ): Promise<MediaStream> => {
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        return await navigator.mediaDevices.getUserMedia({
+        const videoConstraints: MediaTrackConstraints | boolean = wantVideo
+          ? deviceId
+            ? {
+                deviceId: { exact: deviceId },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 },
+              }
+            : {
+                facingMode: { ideal: facingMode },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30 },
+              }
+          : false;
+
+        const media = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
           },
-          video: wantVideo
-            ? {
-                facingMode: { ideal: facingMode },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              }
-            : false,
+          video: videoConstraints,
         });
+        await refreshAvailableCameras();
+        return media;
       }
     } catch {
       if (wantVideo && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -2175,6 +2251,292 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const syncRemoteStreamFromPc = useCallback((pc: RTCPeerConnection, fallbackStream?: MediaStream) => {
+    const receiverTracks = pc
+      .getReceivers()
+      .map(r => r.track)
+      .filter((t): t is MediaStreamTrack => Boolean(t && t.readyState === 'live'));
+
+    if (fallbackStream) {
+      fallbackStream.getTracks().forEach(t => {
+        if (t.readyState === 'live' && !receiverTracks.some(rt => rt.id === t.id)) {
+          receiverTracks.push(t);
+        }
+      });
+    }
+
+    setRemoteStream(new MediaStream(receiverTracks));
+  }, []);
+
+  const attachPeerTrackListeners = useCallback(
+    (pc: RTCPeerConnection, inboundStream: MediaStream) => {
+      pc.ontrack = event => {
+        if (event.streams && event.streams[0]) {
+          event.streams[0].getTracks().forEach(track => {
+            inboundStream.addTrack(track);
+            track.onunmute = () => syncRemoteStreamFromPc(pc, inboundStream);
+            track.onmute = () => syncRemoteStreamFromPc(pc, inboundStream);
+            track.onended = () => syncRemoteStreamFromPc(pc, inboundStream);
+          });
+        } else if (event.track) {
+          inboundStream.addTrack(event.track);
+          event.track.onunmute = () => syncRemoteStreamFromPc(pc, inboundStream);
+          event.track.onmute = () => syncRemoteStreamFromPc(pc, inboundStream);
+          event.track.onended = () => syncRemoteStreamFromPc(pc, inboundStream);
+        }
+        syncRemoteStreamFromPc(pc, inboundStream);
+      };
+    },
+    [syncRemoteStreamFromPc]
+  );
+
+  // Attach or replace outgoing video track (camera or screen) on the RTCPeerConnection
+  const setOutgoingVideoTrack = async (
+    pc: RTCPeerConnection,
+    newVideoTrack: MediaStreamTrack | null,
+    streamForAddTrack?: MediaStream
+  ): Promise<boolean> => {
+    let needsRenegotiation = false;
+    const videoTransceiver = pc
+      .getTransceivers()
+      .find(
+        t =>
+          t.receiver.track?.kind === 'video' ||
+          t.sender.track?.kind === 'video'
+      );
+    const existingVideoSender =
+      pc.getSenders().find(s => s.track?.kind === 'video') || videoTransceiver?.sender;
+
+    if (existingVideoSender) {
+      await existingVideoSender.replaceTrack(newVideoTrack);
+      if (videoTransceiver && newVideoTrack && videoTransceiver.direction !== 'sendrecv') {
+        videoTransceiver.direction = 'sendrecv';
+        needsRenegotiation = true;
+      }
+    } else if (newVideoTrack) {
+      const targetStream = streamForAddTrack || localStreamRef.current || new MediaStream([newVideoTrack]);
+      pc.addTrack(newVideoTrack, targetStream);
+      needsRenegotiation = true;
+    }
+
+    return needsRenegotiation;
+  };
+
+  // Send SDP renegotiation offer or state update to Firestore so both caller and callee stay in sync
+  const updateCallSignalingState = async (
+    call: CallSession,
+    options: {
+      forceRenegotiate?: boolean;
+      videoEnabled?: boolean;
+      screenSharing?: boolean;
+      screenSurface?: 'monitor' | 'window' | 'browser';
+    }
+  ) => {
+    if (!firebaseUser) return;
+    const myUid = firebaseUser.uid;
+    const isCaller = call.callerId === myUid;
+    const pc = peerConnectionRef.current;
+
+    const nextCallerVideo = isCaller
+      ? (options.videoEnabled ?? !isVideoMutedRef.current)
+      : (call.callerVideoEnabled ?? (call.type === 'video'));
+    const nextCalleeVideo = !isCaller
+      ? (options.videoEnabled ?? !isVideoMutedRef.current)
+      : (call.calleeVideoEnabled ?? false);
+
+    const nextCallerScreen = isCaller
+      ? (options.screenSharing ?? isScreenSharingRef.current)
+      : (call.callerScreenSharing ?? false);
+    const nextCalleeScreen = !isCaller
+      ? (options.screenSharing ?? isScreenSharingRef.current)
+      : (call.calleeScreenSharing ?? false);
+
+    const anyScreenSharing = Boolean(nextCallerScreen || nextCalleeScreen);
+
+    let nextOfferSdp = call.offerSdp;
+    let nextOfferType = call.offerType;
+    let nextAnswerSdp = call.answerSdp;
+    let nextAnswerType = call.answerType;
+    let nextOfferSenderId = call.offerSenderId || call.callerId;
+
+    if (options.forceRenegotiate && pc && pc.signalingState === 'stable') {
+      try {
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+        });
+        await pc.setLocalDescription(offer);
+        nextOfferSdp = (offer.sdp || '').slice(0, 30000);
+        nextOfferType = offer.type;
+        nextOfferSenderId = myUid;
+        // Clear answerSdp so the remote peer knows to generate a fresh SDP answer
+        nextAnswerSdp = '';
+        nextAnswerType = '';
+      } catch {
+        // ignore offer error
+      }
+    }
+
+    const updatePayload: Record<string, any> = {
+      isScreenSharing: anyScreenSharing,
+      callerVideoEnabled: nextCallerVideo,
+      calleeVideoEnabled: nextCalleeVideo,
+      callerScreenSharing: nextCallerScreen,
+      calleeScreenSharing: nextCalleeScreen,
+      offerSenderId: nextOfferSenderId,
+      offerSdp: nextOfferSdp,
+      offerType: nextOfferType,
+      answerSdp: nextAnswerSdp,
+      answerType: nextAnswerType,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (options.screenSurface) {
+      updatePayload.screenShareSurface = options.screenSurface;
+    }
+
+    try {
+      await updateDoc(doc(db, 'calls', call.callId), updatePayload);
+    } catch {
+      // ignore transient firestore update race
+    }
+  };
+
+  const bindCallRealtimeSignaling = (
+    callId: string,
+    myUid: string,
+    peerUid: string,
+    pc: RTCPeerConnection,
+    inboundStream: MediaStream,
+    initialOfferSdp: string
+  ) => {
+    let lastHandledOfferSdp = initialOfferSdp;
+    let lastHandledAnswerSdp = '';
+
+    callUnsubRef.current = onSnapshot(doc(db, 'calls', callId), async snap => {
+      if (!snap.exists()) return;
+      const data = snap.data() as CallSession;
+      setActiveCall(data);
+      activeCallRef.current = data;
+
+      setGroupCallParticipants(prev =>
+        prev.map(item =>
+          item.callId === callId ? { ...item, status: data.status } : item
+        )
+      );
+
+      if (data.status === 'ended') {
+        cleanupCallResources();
+        return;
+      }
+
+      const offerSender = data.offerSenderId || data.callerId;
+
+      // Case 1: The remote peer sent a new SDP Offer (initial or mid-call renegotiation)
+      if (
+        data.offerSdp &&
+        data.offerSdp !== lastHandledOfferSdp &&
+        offerSender !== myUid &&
+        !data.answerSdp &&
+        pc.signalingState === 'stable'
+      ) {
+        lastHandledOfferSdp = data.offerSdp;
+        try {
+          await pc.setRemoteDescription(
+            new RTCSessionDescription({
+              type: 'offer',
+              sdp: data.offerSdp,
+            })
+          );
+          await flushPendingIceCandidates(pc);
+
+          const videoTransceiver = pc
+            .getTransceivers()
+            .find(
+              t =>
+                t.receiver.track?.kind === 'video' ||
+                t.sender.track?.kind === 'video'
+            );
+          if (videoTransceiver && videoTransceiver.direction !== 'sendrecv') {
+            videoTransceiver.direction = 'sendrecv';
+          }
+
+          const newAnswer = await pc.createAnswer();
+          await pc.setLocalDescription(newAnswer);
+          lastHandledAnswerSdp = newAnswer.sdp || '';
+
+          syncRemoteStreamFromPc(pc, inboundStream);
+
+          await updateDoc(doc(db, 'calls', callId), {
+            isScreenSharing: data.isScreenSharing,
+            callerVideoEnabled: data.callerVideoEnabled ?? false,
+            calleeVideoEnabled: data.calleeVideoEnabled ?? false,
+            callerScreenSharing: data.callerScreenSharing ?? false,
+            calleeScreenSharing: data.calleeScreenSharing ?? false,
+            offerSenderId: offerSender,
+            offerSdp: data.offerSdp,
+            offerType: data.offerType,
+            answerSdp: (newAnswer.sdp || '').slice(0, 30000),
+            answerType: newAnswer.type,
+            updatedAt: serverTimestamp(),
+          });
+        } catch (err) {
+          console.error('Error handling renegotiation offer:', err);
+        }
+      }
+
+      // Case 2: The remote peer answered OUR SDP Offer (initial or mid-call renegotiation)
+      if (
+        data.answerSdp &&
+        data.answerSdp !== lastHandledAnswerSdp &&
+        offerSender === myUid &&
+        pc.signalingState === 'have-local-offer'
+      ) {
+        lastHandledAnswerSdp = data.answerSdp;
+        try {
+          await pc.setRemoteDescription(
+            new RTCSessionDescription({
+              type: 'answer',
+              sdp: data.answerSdp,
+            })
+          );
+          await flushPendingIceCandidates(pc);
+          syncRemoteStreamFromPc(pc, inboundStream);
+        } catch (err) {
+          console.error('Error setting remote answer SDP:', err);
+        }
+      }
+
+      // Always keep receiver tracks synced when signaling state changes
+      syncRemoteStreamFromPc(pc, inboundStream);
+    });
+
+    const candQuery = query(
+      collection(db, 'calls', callId, 'candidates'),
+      where('callId', '==', callId),
+      where('recipientId', '==', myUid)
+    );
+    candidatesUnsubRef.current = onSnapshot(candQuery, snap => {
+      snap.docChanges().forEach(change => {
+        if (change.type === 'added') {
+          const candData = change.doc.data() as IceCandidateDoc;
+          if (candData.senderId !== myUid) {
+            const candidateInit: RTCIceCandidateInit = {
+              candidate: candData.candidate,
+              sdpMid: candData.sdpMid,
+              sdpMLineIndex: candData.sdpMLineIndex,
+            };
+            if (pc.remoteDescription) {
+              pc.addIceCandidate(new RTCIceCandidate(candidateInit)).catch(() => {});
+            } else {
+              pendingCandidatesRef.current.push(candidateInit);
+            }
+          }
+        }
+      });
+    });
+  };
+
   const startCall = async (type: 'audio' | 'video', targetChat?: Chat | null) => {
     if (!firebaseUser || !profile) return;
     const chat = targetChat || activeChat;
@@ -2185,7 +2547,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     cleanupCallResources();
 
     const myUid = firebaseUser.uid;
-    // Determine peers for 1-on-1 or Group Call
     const groupPeerMembers =
       chat.type === 'group'
         ? activeChatMembers.filter(m => m.userId !== myUid)
@@ -2199,32 +2560,32 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const callId = sanitizeId(`call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
 
-    const stream = await acquireMediaStreamSafe(type === 'video', cameraFacingMode);
+    const stream = await acquireMediaStreamSafe(type === 'video', cameraFacingMode, selectedCameraId || undefined);
     localStreamRef.current = stream;
+    cameraStreamRef.current = stream;
     setLocalStream(stream);
+    setLocalCameraStream(stream);
+
+    const hasInitialVideo = type === 'video' && stream.getVideoTracks().length > 0;
     setIsAudioMuted(false);
-    setIsVideoMuted(type === 'audio' || stream.getVideoTracks().length === 0);
+    setIsVideoMuted(!hasInitialVideo);
+    isVideoMutedRef.current = !hasInitialVideo;
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
     peerConnectionRef.current = pc;
 
     const inboundStream = new MediaStream();
     setRemoteStream(inboundStream);
+    attachPeerTrackListeners(pc, inboundStream);
 
     stream.getTracks().forEach(track => {
       pc.addTrack(track, stream);
     });
 
-    pc.ontrack = event => {
-      if (event.streams && event.streams[0]) {
-        event.streams[0].getTracks().forEach(track => {
-          inboundStream.addTrack(track);
-        });
-      } else if (event.track) {
-        inboundStream.addTrack(event.track);
-      }
-      setRemoteStream(new MediaStream(inboundStream.getTracks()));
-    };
+    // Pre-allocate a sendrecv video transceiver even on audio calls so turning on camera or screen share is instant
+    if (stream.getVideoTracks().length === 0) {
+      pc.addTransceiver('video', { direction: 'sendrecv' });
+    }
 
     pc.onicecandidate = async event => {
       if (event.candidate) {
@@ -2267,6 +2628,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       type,
       status: 'ringing',
       isScreenSharing: false,
+      callerVideoEnabled: hasInitialVideo,
+      calleeVideoEnabled: false,
+      callerScreenSharing: false,
+      calleeScreenSharing: false,
+      offerSenderId: myUid,
       offerSdp: (offer.sdp || '').slice(0, 30000),
       offerType: offer.type,
       answerSdp: '',
@@ -2278,12 +2644,12 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await setDoc(doc(db, 'calls', callId), callDoc);
       setActiveCall(callDoc);
+      activeCallRef.current = callDoc;
     } catch (err) {
       cleanupCallResources();
       handleFirestoreError(err, OperationType.CREATE, `calls/${callId}`);
     }
 
-    // If this is a Group Call with multiple members, ring all group participants in real time
     if (chat.type === 'group' && groupPeerMembers.length > 0) {
       const initialParticipants: GroupCallParticipant[] = groupPeerMembers.map((m, idx) => ({
         uid: m.userId,
@@ -2294,7 +2660,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }));
       setGroupCallParticipants(initialParticipants);
 
-      // Ring additional group members (index >= 1) so each member gets an incoming call notification
       for (let i = 1; i < initialParticipants.length; i++) {
         const p = initialParticipants[i];
         const extraDoc: CallSession = {
@@ -2320,61 +2685,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    callUnsubRef.current = onSnapshot(doc(db, 'calls', callId), async snap => {
-      if (!snap.exists()) return;
-      const data = snap.data() as CallSession;
-      setActiveCall(data);
-
-      setGroupCallParticipants(prev =>
-        prev.map(item =>
-          item.callId === callId ? { ...item, status: data.status } : item
-        )
-      );
-
-      if (data.status === 'ended') {
-        cleanupCallResources();
-        return;
-      }
-
-      if (data.answerSdp && (!pc.currentRemoteDescription || pc.signalingState === 'have-local-offer')) {
-        try {
-          await pc.setRemoteDescription(
-            new RTCSessionDescription({
-              type: 'answer',
-              sdp: data.answerSdp,
-            })
-          );
-          await flushPendingIceCandidates(pc);
-        } catch (e) {
-          console.error('Error setting remote answer SDP:', e);
-        }
-      }
-    });
-
-    const candQuery = query(
-      collection(db, 'calls', callId, 'candidates'),
-      where('callId', '==', callId),
-      where('recipientId', '==', myUid)
-    );
-    candidatesUnsubRef.current = onSnapshot(candQuery, snap => {
-      snap.docChanges().forEach(change => {
-        if (change.type === 'added') {
-          const candData = change.doc.data() as IceCandidateDoc;
-          if (candData.senderId !== myUid) {
-            const candidateInit: RTCIceCandidateInit = {
-              candidate: candData.candidate,
-              sdpMid: candData.sdpMid,
-              sdpMLineIndex: candData.sdpMLineIndex,
-            };
-            if (pc.remoteDescription) {
-              pc.addIceCandidate(new RTCIceCandidate(candidateInit)).catch(() => {});
-            } else {
-              pendingCandidatesRef.current.push(candidateInit);
-            }
-          }
-        }
-      });
-    });
+    bindCallRealtimeSignaling(callId, myUid, primaryCalleeId, pc, inboundStream, offer.sdp || '');
   };
 
   const acceptIncomingCall = async () => {
@@ -2385,32 +2696,27 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     cleanupCallResources();
 
-    const stream = await acquireMediaStreamSafe(call.type === 'video', cameraFacingMode);
+    const stream = await acquireMediaStreamSafe(call.type === 'video', cameraFacingMode, selectedCameraId || undefined);
     localStreamRef.current = stream;
+    cameraStreamRef.current = stream;
     setLocalStream(stream);
+    setLocalCameraStream(stream);
+
+    const hasInitialVideo = call.type === 'video' && stream.getVideoTracks().length > 0;
     setIsAudioMuted(false);
-    setIsVideoMuted(call.type === 'audio' || stream.getVideoTracks().length === 0);
+    setIsVideoMuted(!hasInitialVideo);
+    isVideoMutedRef.current = !hasInitialVideo;
 
     const pc = new RTCPeerConnection(RTC_CONFIG);
     peerConnectionRef.current = pc;
 
     const inboundStream = new MediaStream();
     setRemoteStream(inboundStream);
+    attachPeerTrackListeners(pc, inboundStream);
 
     stream.getTracks().forEach(track => {
       pc.addTrack(track, stream);
     });
-
-    pc.ontrack = event => {
-      if (event.streams && event.streams[0]) {
-        event.streams[0].getTracks().forEach(track => {
-          inboundStream.addTrack(track);
-        });
-      } else if (event.track) {
-        inboundStream.addTrack(event.track);
-      }
-      setRemoteStream(new MediaStream(inboundStream.getTracks()));
-    };
 
     pc.onicecandidate = async event => {
       if (event.candidate) {
@@ -2440,93 +2746,69 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
     await flushPendingIceCandidates(pc);
 
+    // Ensure the video transceiver is sendrecv so callee can also turn on camera or share screen anytime
+    const videoTransceiver = pc
+      .getTransceivers()
+      .find(
+        t =>
+          t.receiver.track?.kind === 'video' ||
+          t.sender.track?.kind === 'video'
+      );
+    if (videoTransceiver) {
+      const myVideoTrack = stream.getVideoTracks()[0];
+      if (myVideoTrack && videoTransceiver.sender.track?.id !== myVideoTrack.id) {
+        await videoTransceiver.sender.replaceTrack(myVideoTrack);
+      }
+      videoTransceiver.direction = 'sendrecv';
+    }
+
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+    syncRemoteStreamFromPc(pc, inboundStream);
 
     try {
-      await updateDoc(doc(db, 'calls', callId), {
+      const updatedCall: CallSession = {
+        ...call,
+        status: 'connected',
+        callerVideoEnabled: call.callerVideoEnabled ?? (call.type === 'video'),
+        calleeVideoEnabled: hasInitialVideo,
+        callerScreenSharing: call.callerScreenSharing ?? call.isScreenSharing,
+        calleeScreenSharing: false,
+        offerSenderId: call.offerSenderId || call.callerId,
         answerSdp: (answer.sdp || '').slice(0, 30000),
         answerType: answer.type,
+      };
+      await updateDoc(doc(db, 'calls', callId), {
+        answerSdp: updatedCall.answerSdp,
+        answerType: updatedCall.answerType,
         status: 'connected',
+        callerVideoEnabled: updatedCall.callerVideoEnabled,
+        calleeVideoEnabled: updatedCall.calleeVideoEnabled,
+        callerScreenSharing: updatedCall.callerScreenSharing,
+        calleeScreenSharing: updatedCall.calleeScreenSharing,
+        offerSenderId: updatedCall.offerSenderId,
         updatedAt: serverTimestamp(),
       });
       setIncomingCall(null);
-      setActiveCall({ ...call, status: 'connected' });
+      setActiveCall(updatedCall);
+      activeCallRef.current = updatedCall;
     } catch (err) {
       cleanupCallResources();
       handleFirestoreError(err, OperationType.UPDATE, `calls/${callId}`);
     }
 
-    let lastSeenOfferSdp = call.offerSdp;
-
-    callUnsubRef.current = onSnapshot(doc(db, 'calls', callId), async snap => {
-      if (!snap.exists()) return;
-      const data = snap.data() as CallSession;
-      setActiveCall(data);
-      if (data.status === 'ended') {
-        cleanupCallResources();
-        return;
-      }
-
-      // Handle live SDP renegotiation (e.g., when caller enables camera or screen share mid-call)
-      if (data.offerSdp && data.offerSdp !== lastSeenOfferSdp && pc.signalingState === 'stable') {
-        lastSeenOfferSdp = data.offerSdp;
-        try {
-          await pc.setRemoteDescription(
-            new RTCSessionDescription({
-              type: 'offer',
-              sdp: data.offerSdp,
-            })
-          );
-          const newAnswer = await pc.createAnswer();
-          await pc.setLocalDescription(newAnswer);
-          await updateDoc(doc(db, 'calls', callId), {
-            isScreenSharing: data.isScreenSharing,
-            offerSdp: data.offerSdp,
-            offerType: data.offerType,
-            answerSdp: (newAnswer.sdp || '').slice(0, 30000),
-            answerType: newAnswer.type,
-            updatedAt: serverTimestamp(),
-          });
-        } catch {
-          // ignore renegotiation race
-        }
-      }
-    });
-
-    const candQuery = query(
-      collection(db, 'calls', callId, 'candidates'),
-      where('callId', '==', callId),
-      where('recipientId', '==', myUid)
-    );
-    candidatesUnsubRef.current = onSnapshot(candQuery, snap => {
-      snap.docChanges().forEach(change => {
-        if (change.type === 'added') {
-          const candData = change.doc.data() as IceCandidateDoc;
-          if (candData.senderId !== myUid) {
-            const candidateInit: RTCIceCandidateInit = {
-              candidate: candData.candidate,
-              sdpMid: candData.sdpMid,
-              sdpMLineIndex: candData.sdpMLineIndex,
-            };
-            if (pc.remoteDescription) {
-              pc.addIceCandidate(new RTCIceCandidate(candidateInit)).catch(() => {});
-            } else {
-              pendingCandidatesRef.current.push(candidateInit);
-            }
-          }
-        }
-      });
-    });
+    bindCallRealtimeSignaling(callId, myUid, call.callerId, pc, inboundStream, call.offerSdp);
   };
 
   const declineOrEndCall = async () => {
-    const targetCall = activeCall || incomingCall;
+    const targetCall = activeCallRef.current || activeCall || incomingCall;
     if (targetCall && targetCall.status !== 'ended') {
       try {
         await updateDoc(doc(db, 'calls', targetCall.callId), {
           status: 'ended',
           isScreenSharing: false,
+          callerScreenSharing: false,
+          calleeScreenSharing: false,
           updatedAt: serverTimestamp(),
         });
       } catch {
@@ -2538,6 +2820,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateDoc(doc(db, 'calls', p.callId), {
           status: 'ended',
           isScreenSharing: false,
+          callerScreenSharing: false,
+          calleeScreenSharing: false,
           updatedAt: serverTimestamp(),
         }).catch(() => {});
       }
@@ -2547,122 +2831,255 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const toggleMuteAudio = () => {
-    if (!localStreamRef.current) return;
-    localStreamRef.current.getAudioTracks().forEach(track => {
-      track.enabled = !track.enabled;
-      setIsAudioMuted(!track.enabled);
+    const audioTracks = [
+      ...(localStreamRef.current?.getAudioTracks() || []),
+      ...(cameraStreamRef.current?.getAudioTracks() || []),
+    ];
+    if (audioTracks.length === 0) return;
+    const nextEnabled = isAudioMuted;
+    audioTracks.forEach(track => {
+      track.enabled = nextEnabled;
     });
+    setIsAudioMuted(!nextEnabled);
   };
 
   const toggleMuteVideo = async () => {
-    if (!localStreamRef.current) return;
-    const videoTracks = localStreamRef.current.getVideoTracks();
-    if (videoTracks.length > 0) {
-      videoTracks.forEach(track => {
-        track.enabled = !track.enabled;
-        setIsVideoMuted(!track.enabled);
-      });
+    const currentCall = activeCallRef.current || activeCall;
+    const pc = peerConnectionRef.current;
+
+    // If camera is currently ON -> turn it OFF
+    if (!isVideoMutedRef.current) {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getVideoTracks().forEach(track => {
+          track.enabled = false;
+          track.stop();
+          cameraStreamRef.current?.removeTrack(track);
+        });
+        setLocalCameraStream(new MediaStream(cameraStreamRef.current.getTracks()));
+      }
+
+      if (!isScreenSharingRef.current) {
+        if (localStreamRef.current) {
+          localStreamRef.current.getVideoTracks().forEach(track => {
+            track.enabled = false;
+            track.stop();
+            localStreamRef.current?.removeTrack(track);
+          });
+          setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
+        }
+        if (pc) {
+          await setOutgoingVideoTrack(pc, null);
+        }
+      }
+
+      setIsVideoMuted(true);
+      isVideoMutedRef.current = true;
+
+      if (currentCall) {
+        await updateCallSignalingState(currentCall, {
+          forceRenegotiate: false,
+          videoEnabled: false,
+        });
+      }
       return;
     }
 
-    // If call started as audio-only and user turns on camera during the call:
+    // Camera is currently OFF -> acquire fresh camera video stream and turn it ON
     try {
-      const camStream = await acquireMediaStreamSafe(true, cameraFacingMode);
-      const newVideoTrack = camStream.getVideoTracks()[0];
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+      const videoConstraints: MediaTrackConstraints = selectedCameraId
+        ? {
+            deviceId: { exact: selectedCameraId },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
+          }
+        : {
+            facingMode: { ideal: cameraFacingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
+          };
+
+      const camVideoOnly = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: false,
+      });
+      const newVideoTrack = camVideoOnly.getVideoTracks()[0];
       if (!newVideoTrack) return;
 
-      localStreamRef.current.addTrack(newVideoTrack);
-      setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-      setIsVideoMuted(false);
+      const existingAudioTracks =
+        cameraStreamRef.current?.getAudioTracks() ||
+        localStreamRef.current?.getAudioTracks() ||
+        [];
+      const updatedCameraStream = new MediaStream([...existingAudioTracks, newVideoTrack]);
+      cameraStreamRef.current = updatedCameraStream;
+      setLocalCameraStream(updatedCameraStream);
 
-      const pc = peerConnectionRef.current;
-      if (pc && activeCall) {
-        const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-        if (videoSender) {
-          await videoSender.replaceTrack(newVideoTrack);
-        } else {
-          pc.addTrack(newVideoTrack, localStreamRef.current);
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          await updateDoc(doc(db, 'calls', activeCall.callId), {
-            isScreenSharing: activeCall.isScreenSharing,
-            offerSdp: (offer.sdp || '').slice(0, 30000),
-            offerType: offer.type,
-            answerSdp: activeCall.answerSdp,
-            answerType: activeCall.answerType,
-            updatedAt: serverTimestamp(),
+      await refreshAvailableCameras();
+
+      setIsVideoMuted(false);
+      isVideoMutedRef.current = false;
+
+      // If not currently sharing screen, send the camera track over WebRTC and display in main localStream
+      if (!isScreenSharingRef.current) {
+        localStreamRef.current = updatedCameraStream;
+        setLocalStream(updatedCameraStream);
+
+        let needsRenegotiation = true;
+        if (pc) {
+          await setOutgoingVideoTrack(pc, newVideoTrack, updatedCameraStream);
+          needsRenegotiation = true;
+        }
+        if (currentCall) {
+          await updateCallSignalingState(currentCall, {
+            forceRenegotiate: needsRenegotiation,
+            videoEnabled: true,
           });
         }
+      } else if (currentCall) {
+        await updateCallSignalingState(currentCall, {
+          forceRenegotiate: false,
+          videoEnabled: true,
+        });
       }
     } catch {
-      // ignore if camera unavailable
+      // Fallback if exact deviceId failed
+      try {
+        const fallbackStream = await acquireMediaStreamSafe(true, cameraFacingMode);
+        const newVideoTrack = fallbackStream.getVideoTracks()[0];
+        if (!newVideoTrack) return;
+        cameraStreamRef.current = fallbackStream;
+        setLocalCameraStream(fallbackStream);
+        setIsVideoMuted(false);
+        isVideoMutedRef.current = false;
+
+        if (!isScreenSharingRef.current) {
+          localStreamRef.current = fallbackStream;
+          setLocalStream(fallbackStream);
+          if (pc) {
+            await setOutgoingVideoTrack(pc, newVideoTrack, fallbackStream);
+          }
+        }
+        if (currentCall) {
+          await updateCallSignalingState(currentCall, {
+            forceRenegotiate: true,
+            videoEnabled: true,
+          });
+        }
+      } catch {
+        // ignore if camera hardware unavailable
+      }
     }
   };
 
-  const switchCamera = async () => {
-    if (!activeCall) return;
+  const switchCamera = async (targetDeviceId?: string) => {
+    const currentCall = activeCallRef.current || activeCall;
+    if (!currentCall) return;
+
     const nextFacingMode: 'user' | 'environment' =
       cameraFacingMode === 'user' ? 'environment' : 'user';
-    setCameraFacingMode(nextFacingMode);
+    if (!targetDeviceId) {
+      setCameraFacingMode(nextFacingMode);
+    }
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
 
-      // Also check if multiple videoinput devices exist so desktop webcams can cycle too
       const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
       const videoInputs = devices.filter(d => d.kind === 'videoinput');
-      const currentVideoTrack = localStreamRef.current?.getVideoTracks()[0];
-      const currentDeviceId = currentVideoTrack?.getSettings?.().deviceId;
+      setAvailableCameras(videoInputs);
 
-      let videoConstraints: MediaTrackConstraints = {
-        facingMode: { ideal: nextFacingMode },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      };
+      const currentVideoTrack = cameraStreamRef.current?.getVideoTracks()[0];
+      const currentDeviceId = currentVideoTrack?.getSettings?.().deviceId || selectedCameraId;
 
-      if (videoInputs.length > 1 && currentDeviceId) {
+      let chosenDeviceId = targetDeviceId || '';
+      if (!chosenDeviceId && videoInputs.length > 1 && currentDeviceId) {
         const idx = videoInputs.findIndex(d => d.deviceId === currentDeviceId);
         const nextDevice = videoInputs[(idx + 1) % videoInputs.length];
         if (nextDevice?.deviceId) {
-          videoConstraints = {
-            deviceId: { exact: nextDevice.deviceId },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          };
+          chosenDeviceId = nextDevice.deviceId;
         }
       }
 
-      const newVideoStream = await navigator.mediaDevices.getUserMedia({
-        video: videoConstraints,
-        audio: false,
-      });
+      const buildConstraints = (useExactDevice: boolean): MediaTrackConstraints => {
+        if (useExactDevice && chosenDeviceId) {
+          return {
+            deviceId: { exact: chosenDeviceId },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
+          };
+        }
+        return {
+          facingMode: { ideal: nextFacingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 },
+        };
+      };
+
+      let newVideoStream: MediaStream;
+      try {
+        newVideoStream = await navigator.mediaDevices.getUserMedia({
+          video: buildConstraints(Boolean(chosenDeviceId)),
+          audio: false,
+        });
+      } catch {
+        newVideoStream = await navigator.mediaDevices.getUserMedia({
+          video: buildConstraints(false),
+          audio: false,
+        });
+      }
+
       const newVideoTrack = newVideoStream.getVideoTracks()[0];
       if (!newVideoTrack) return;
 
-      const pc = peerConnectionRef.current;
-      if (pc) {
-        const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-        if (videoSender) {
-          await videoSender.replaceTrack(newVideoTrack);
-        } else if (localStreamRef.current) {
-          pc.addTrack(newVideoTrack, localStreamRef.current);
-        }
+      const resolvedSettings = newVideoTrack.getSettings?.();
+      if (resolvedSettings?.deviceId) {
+        setSelectedCameraId(resolvedSettings.deviceId);
+      }
+      if (resolvedSettings?.facingMode === 'environment' || resolvedSettings?.facingMode === 'user') {
+        setCameraFacingMode(resolvedSettings.facingMode);
       }
 
-      if (localStreamRef.current) {
-        localStreamRef.current.getVideoTracks().forEach(t => {
+      // Stop old camera video tracks cleanly
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getVideoTracks().forEach(t => {
           t.stop();
-          localStreamRef.current?.removeTrack(t);
+          cameraStreamRef.current?.removeTrack(t);
         });
-        localStreamRef.current.addTrack(newVideoTrack);
-        setLocalStream(new MediaStream(localStreamRef.current.getTracks()));
-      } else {
-        localStreamRef.current = newVideoStream;
-        setLocalStream(newVideoStream);
       }
+
+      const existingAudioTracks =
+        cameraStreamRef.current?.getAudioTracks() ||
+        localStreamRef.current?.getAudioTracks() ||
+        [];
+      const updatedCameraStream = new MediaStream([...existingAudioTracks, newVideoTrack]);
+      cameraStreamRef.current = updatedCameraStream;
+      setLocalCameraStream(updatedCameraStream);
       setIsVideoMuted(false);
+      isVideoMutedRef.current = false;
+
+      const pc = peerConnectionRef.current;
+      if (!isScreenSharingRef.current) {
+        localStreamRef.current = updatedCameraStream;
+        setLocalStream(updatedCameraStream);
+        if (pc) {
+          await setOutgoingVideoTrack(pc, newVideoTrack, updatedCameraStream);
+        }
+        await updateCallSignalingState(currentCall, {
+          forceRenegotiate: true,
+          videoEnabled: true,
+        });
+      } else {
+        await updateCallSignalingState(currentCall, {
+          forceRenegotiate: false,
+          videoEnabled: true,
+        });
+      }
     } catch {
-      // Fallback if second camera is not available on current device
+      // Fallback if camera switch fails on single-camera device
     }
   };
 
@@ -2670,83 +3087,144 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsSpeakerOn(prev => !prev);
   };
 
-  const toggleScreenShare = async () => {
-    if (!activeCall) return;
+  const stopScreenShare = useCallback(async () => {
+    const currentCall = activeCallRef.current || activeCall;
     const pc = peerConnectionRef.current;
 
-    if (!isScreenSharing) {
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return;
-        const displayStream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-        });
-        const screenTrack = displayStream.getVideoTracks()[0];
-        if (!screenTrack) return;
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(t => {
+        t.onended = null;
+        t.stop();
+      });
+      screenStreamRef.current = null;
+    }
+    setLocalScreenStream(null);
+    setIsScreenSharing(false);
+    isScreenSharingRef.current = false;
 
-        let nextOfferSdp = activeCall.offerSdp;
-        let nextOfferType = activeCall.offerType;
+    const camVideoTrack =
+      !isVideoMutedRef.current
+        ? cameraStreamRef.current?.getVideoTracks().find(t => t.readyState === 'live') || null
+        : null;
 
-        if (pc) {
-          const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-          if (videoSender) {
-            await videoSender.replaceTrack(screenTrack);
-          } else {
-            pc.addTrack(screenTrack, displayStream);
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            nextOfferSdp = (offer.sdp || '').slice(0, 30000);
-            nextOfferType = offer.type;
-          }
-        }
+    const audioTracks =
+      cameraStreamRef.current?.getAudioTracks() ||
+      localStreamRef.current?.getAudioTracks() ||
+      [];
 
-        if (localStreamRef.current) {
-          const audioTracks = localStreamRef.current.getAudioTracks();
-          const combined = new MediaStream([...audioTracks, screenTrack]);
-          setLocalStream(combined);
-        } else {
-          setLocalStream(displayStream);
-        }
-
-        screenTrack.onended = () => {
-          toggleScreenShare().catch(() => {});
-        };
-
-        setIsScreenSharing(true);
-        await updateDoc(doc(db, 'calls', activeCall.callId), {
-          isScreenSharing: true,
-          offerSdp: nextOfferSdp,
-          offerType: nextOfferType,
-          answerSdp: activeCall.answerSdp,
-          answerType: activeCall.answerType,
-          updatedAt: serverTimestamp(),
-        });
-      } catch {
-        // User canceled screen share or browser denied permission
+    if (camVideoTrack) {
+      const restoredStream = new MediaStream([...audioTracks, camVideoTrack]);
+      localStreamRef.current = restoredStream;
+      setLocalStream(restoredStream);
+      if (pc) {
+        await setOutgoingVideoTrack(pc, camVideoTrack, restoredStream);
       }
     } else {
-      try {
-        const camStream = await acquireMediaStreamSafe(true, cameraFacingMode);
-        const camTrack = camStream.getVideoTracks()[0];
-        if (pc && camTrack) {
-          const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-          if (videoSender) {
-            await videoSender.replaceTrack(camTrack);
-          }
-        }
-        localStreamRef.current = camStream;
-        setLocalStream(camStream);
-        setIsScreenSharing(false);
-        await updateDoc(doc(db, 'calls', activeCall.callId), {
-          isScreenSharing: false,
-          offerSdp: activeCall.offerSdp,
-          offerType: activeCall.offerType,
-          answerSdp: activeCall.answerSdp,
-          answerType: activeCall.answerType,
-          updatedAt: serverTimestamp(),
-        });
-      } catch {
-        setIsScreenSharing(false);
+      const audioOnlyStream = new MediaStream([...audioTracks]);
+      localStreamRef.current = audioOnlyStream;
+      setLocalStream(audioOnlyStream);
+      if (pc) {
+        await setOutgoingVideoTrack(pc, null);
       }
+    }
+
+    if (currentCall) {
+      await updateCallSignalingState(currentCall, {
+        forceRenegotiate: true,
+        screenSharing: false,
+        videoEnabled: Boolean(camVideoTrack),
+      });
+    }
+  }, [activeCall]);
+
+  const startScreenShare = async (options?: ScreenShareOptions): Promise<boolean> => {
+    const currentCall = activeCallRef.current || activeCall;
+    if (!currentCall) return false;
+    const pc = peerConnectionRef.current;
+
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        return false;
+      }
+
+      const targetWidth = options?.resolution === '720p' ? 1280 : 1920;
+      const targetHeight = options?.resolution === '720p' ? 720 : 1080;
+      const targetFps = options?.fps || 30;
+      const surface = options?.surface || 'monitor';
+
+      const displayMediaConstraints: DisplayMediaStreamOptions = {
+        video: {
+          displaySurface: surface,
+          width: { ideal: targetWidth, max: 1920 },
+          height: { ideal: targetHeight, max: 1080 },
+          frameRate: { ideal: targetFps, max: 60 },
+        } as MediaTrackConstraints,
+        audio: options?.includeSystemAudio !== false,
+      };
+
+      const displayStream = await navigator.mediaDevices.getDisplayMedia(displayMediaConstraints);
+      const screenTrack = displayStream.getVideoTracks()[0];
+      if (!screenTrack) return false;
+
+      if ('contentHint' in screenTrack) {
+        try {
+          screenTrack.contentHint = targetFps >= 60 ? 'motion' : 'detail';
+        } catch {
+          // ignore
+        }
+      }
+
+      // Stop previous screen stream if switching screen source live
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach(t => {
+          t.onended = null;
+          t.stop();
+        });
+      }
+
+      screenStreamRef.current = displayStream;
+      setLocalScreenStream(displayStream);
+
+      const micAudioTracks =
+        cameraStreamRef.current?.getAudioTracks() ||
+        localStreamRef.current?.getAudioTracks() ||
+        [];
+      const combinedStream = new MediaStream([...micAudioTracks, screenTrack]);
+      localStreamRef.current = combinedStream;
+      setLocalStream(combinedStream);
+
+      if (pc) {
+        await setOutgoingVideoTrack(pc, screenTrack, combinedStream);
+      }
+
+      screenTrack.onended = () => {
+        stopScreenShare().catch(() => {});
+      };
+
+      setIsScreenSharing(true);
+      isScreenSharingRef.current = true;
+
+      await updateCallSignalingState(currentCall, {
+        forceRenegotiate: true,
+        screenSharing: true,
+        screenSurface: surface,
+      });
+
+      return true;
+    } catch {
+      // User canceled native screen picker or permission denied
+      return false;
+    }
+  };
+
+  const toggleScreenShare = async (options?: ScreenShareOptions) => {
+    if (!isScreenSharingRef.current) {
+      await startScreenShare(options);
+    } else if (options) {
+      // Switching screen source while already sharing
+      await startScreenShare(options);
+    } else {
+      await stopScreenShare();
     }
   };
 
@@ -2781,12 +3259,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         incomingCall,
         callHistory,
         localStream,
+        localCameraStream,
+        localScreenStream,
         remoteStream,
         isAudioMuted,
         isVideoMuted,
         isScreenSharing,
         isSpeakerOn,
         cameraFacingMode,
+        availableCameras,
+        selectedCameraId,
         groupCallParticipants,
         setActiveTab,
         setActiveChatId,
@@ -2832,7 +3314,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         toggleMuteAudio,
         toggleMuteVideo,
         toggleScreenShare,
+        startScreenShare,
+        stopScreenShare,
         switchCamera,
+        refreshAvailableCameras,
         toggleSpeakerphone,
       }}
     >

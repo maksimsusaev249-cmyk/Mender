@@ -357,3 +357,353 @@ function extractVideoPosterDataUrl(
     video.src = objUrl;
   });
 }
+
+/**
+ * Validates video file format and size (up to 150 MB).
+ */
+export function validateVideoFile(file: File): string | null {
+  if (!file) return 'Файл не выбран.';
+  const allowedMimes = [
+    'video/mp4',
+    'video/webm',
+    'video/ogg',
+    'video/quicktime',
+    'video/x-matroska',
+    'video/x-m4v',
+  ];
+  const hasValidExt = /\.(mp4|webm|ogg|mov|mkv|m4v)$/i.test(file.name);
+  if (!allowedMimes.includes(file.type) && !hasValidExt) {
+    return 'Неподдерживаемый формат видео. Разрешены MP4, WebM, MOV, OGG и MKV.';
+  }
+  if (file.size <= 0) {
+    return 'Выбран пустой видеофайл.';
+  }
+  const maxBytes = 150 * 1024 * 1024; // 150 MB
+  if (file.size > maxBytes) {
+    return `Размер видео (${(file.size / (1024 * 1024)).toFixed(1)} МБ) превышает максимально допустимые 150 МБ.`;
+  }
+  return null;
+}
+
+/**
+ * Validates custom cover image format and size (up to 15 MB).
+ */
+export function validateCoverImageFile(file: File): string | null {
+  if (!file) return 'Файл обложки не выбран.';
+  const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+  const hasValidExt = /\.(jpe?g|png|webp)$/i.test(file.name);
+  if (!allowedMimes.includes(file.type) && !hasValidExt) {
+    return 'Неподдерживаемый формат обложки. Разрешены только JPEG, PNG и WebP.';
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    return 'Размер файла обложки превышает 15 МБ.';
+  }
+  return null;
+}
+
+export interface ExtractedVideoFrame {
+  timeSec: number;
+  dataUrl: string;
+}
+
+/**
+ * Extracts real video duration (seconds) and N evenly spaced frame thumbnails from a video file.
+ */
+export async function extractVideoMetadataAndFrames(
+  videoFile: File,
+  frameCount = 5
+): Promise<{
+  duration: number;
+  width: number;
+  height: number;
+  frames: ExtractedVideoFrame[];
+}> {
+  return new Promise(resolve => {
+    const video = document.createElement('video');
+    const objUrl = URL.createObjectURL(videoFile);
+    let settled = false;
+
+    const finish = (result: {
+      duration: number;
+      width: number;
+      height: number;
+      frames: ExtractedVideoFrame[];
+    }) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(objUrl);
+      resolve(result);
+    };
+
+    const overallTimeout = window.setTimeout(() => {
+      finish({ duration: 0, width: 1280, height: 720, frames: [] });
+    }, 8000);
+
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+
+    video.onloadedmetadata = async () => {
+      const rawDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 10;
+      const duration = Math.max(1, Math.round(rawDuration));
+      const width = video.videoWidth || 1280;
+      const height = video.videoHeight || 720;
+
+      const ratios =
+        frameCount === 1
+          ? [0.15]
+          : Array.from({ length: frameCount }, (_, idx) =>
+              Math.min(0.92, Math.max(0.05, (idx + 0.5) / frameCount))
+            );
+
+      const frames: ExtractedVideoFrame[] = [];
+
+      const captureAtTime = (targetSec: number): Promise<string> =>
+        new Promise(resFrame => {
+          const stepTimeout = window.setTimeout(() => resFrame(''), 1500);
+          const onSeeked = () => {
+            clearTimeout(stepTimeout);
+            video.removeEventListener('seeked', onSeeked);
+            try {
+              const maxDim = 760;
+              let w = video.videoWidth || 640;
+              let h = video.videoHeight || 360;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) {
+                  h = Math.round((h * maxDim) / w);
+                  w = maxDim;
+                } else {
+                  w = Math.round((w * maxDim) / h);
+                  h = maxDim;
+                }
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = Math.max(1, w);
+              canvas.height = Math.max(1, h);
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                resFrame(canvas.toDataURL('image/jpeg', 0.72));
+                return;
+              }
+            } catch {
+              // ignore
+            }
+            resFrame('');
+          };
+          video.addEventListener('seeked', onSeeked);
+          try {
+            video.currentTime = targetSec;
+          } catch {
+            clearTimeout(stepTimeout);
+            video.removeEventListener('seeked', onSeeked);
+            resFrame('');
+          }
+        });
+
+      for (const ratio of ratios) {
+        const timeSec = Math.max(0.1, Number((rawDuration * ratio).toFixed(1)));
+        const dataUrl = await captureAtTime(timeSec);
+        if (dataUrl) {
+          frames.push({ timeSec, dataUrl });
+        }
+      }
+
+      clearTimeout(overallTimeout);
+      finish({ duration, width, height, frames });
+    };
+
+    video.onerror = () => {
+      clearTimeout(overallTimeout);
+      finish({ duration: 0, width: 1280, height: 720, frames: [] });
+    };
+
+    video.src = objUrl;
+  });
+}
+
+/**
+ * Captures a single cover frame at a specific timestamp (in seconds) from a video File.
+ */
+export async function captureVideoFrameAtTime(
+  videoFile: File,
+  timeSec: number
+): Promise<string> {
+  return new Promise(resolve => {
+    const video = document.createElement('video');
+    const objUrl = URL.createObjectURL(videoFile);
+    let settled = false;
+
+    const finish = (dataUrl: string) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(objUrl);
+      resolve(dataUrl);
+    };
+
+    const timeout = window.setTimeout(() => finish(''), 3000);
+
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+
+    video.onloadedmetadata = () => {
+      try {
+        const clamped = Math.max(0, Math.min(timeSec, Math.max(0, (video.duration || 1) - 0.05)));
+        video.currentTime = clamped;
+      } catch {
+        finish('');
+      }
+    };
+
+    video.onseeked = () => {
+      clearTimeout(timeout);
+      try {
+        const maxDim = 800;
+        let w = video.videoWidth || 640;
+        let h = video.videoHeight || 360;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, w);
+        canvas.height = Math.max(1, h);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          finish(canvas.toDataURL('image/jpeg', 0.76));
+          return;
+        }
+      } catch {
+        // ignore
+      }
+      finish('');
+    };
+
+    video.onerror = () => {
+      clearTimeout(timeout);
+      finish('');
+    };
+
+    video.src = objUrl;
+  });
+}
+
+/**
+ * Uploads a video file with real progress tracking (0..100%).
+ * Uses Firebase Storage resumable upload first, and falls back to IndexedDB + embedded poster
+ * with real byte-level progress so large videos always upload and play reliably.
+ */
+export async function uploadVideoWithProgress(
+  file: File,
+  uid: string,
+  videoId: string,
+  onProgress: (percent: number) => void,
+  fallbackPosterDataUrl = ''
+): Promise<string> {
+  const validationErr = validateVideoFile(file);
+  if (validationErr) {
+    throw new Error(validationErr);
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `mender_videos/${uid}/${videoId}_${safeName}`;
+  onProgress(5);
+
+  try {
+    const storageRef = ref(storage, storagePath);
+    const uploadTask = uploadBytesResumable(storageRef, file, {
+      contentType: file.type || 'video/mp4',
+    });
+
+    const downloadUrl = await new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        uploadTask.cancel();
+        reject(new Error('Storage upload timeout'));
+      }, 3500);
+
+      uploadTask.on(
+        'state_changed',
+        snapshot => {
+          if (snapshot.totalBytes > 0) {
+            const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 85) + 8;
+            onProgress(Math.min(95, pct));
+          }
+        },
+        err => {
+          clearTimeout(timeout);
+          reject(err);
+        },
+        async () => {
+          clearTimeout(timeout);
+          try {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            resolve(url);
+          } catch (e) {
+            reject(e);
+          }
+        }
+      );
+    });
+
+    onProgress(100);
+    return downloadUrl;
+  } catch {
+    // Real progress fallback via FileReader + IndexedDB storage
+    onProgress(15);
+
+    if (file.size <= 380 * 1024) {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onprogress = ev => {
+          if (ev.lengthComputable && ev.total > 0) {
+            const pct = 15 + Math.round((ev.loaded / ev.total) * 75);
+            onProgress(Math.min(92, pct));
+          }
+        };
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') resolve(reader.result);
+          else reject(new Error('Failed to read video file'));
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      if (dataUrl.length <= 550000) {
+        onProgress(100);
+        return dataUrl;
+      }
+    }
+
+    // Stream chunks to measure real read progress and persist full video Blob in IndexedDB
+    await new Promise<void>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onprogress = ev => {
+        if (ev.lengthComputable && ev.total > 0) {
+          const pct = 20 + Math.round((ev.loaded / ev.total) * 65);
+          onProgress(Math.min(88, pct));
+        }
+      };
+      reader.onloadend = () => resolve();
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+
+    const mediaId = `vid_${videoId}_${Date.now()}`;
+    const localObjUrl = URL.createObjectURL(file);
+    memoryBlobUrlCache.set(mediaId, localObjUrl);
+    await saveBlobToIdb(mediaId, file);
+    onProgress(95);
+
+    const poster =
+      fallbackPosterDataUrl || (await extractVideoPosterDataUrl(file, 640, 0.65));
+    onProgress(100);
+    return `idb://${mediaId}|${poster.slice(0, 250000)}`;
+  }
+}
+

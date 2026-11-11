@@ -10,6 +10,7 @@ import {
   LogOut,
   Lock,
   User,
+  Film,
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
@@ -19,6 +20,7 @@ export const Sidebar: React.FC = () => {
   const navItems = [
     { id: 'my_page', tab: 'settings', section: 'profile', label: 'Моя страница', icon: User },
     { id: 'feed', tab: 'feed', label: 'Новости', icon: Newspaper },
+    { id: 'video', tab: 'video', label: 'Mender Video', icon: Film },
     { id: 'chats', tab: 'chats', label: 'Мессенджер', icon: MessageSquare, count: chats.length },
     { id: 'calls', tab: 'calls', label: 'Звонки', icon: PhoneCall },
     { id: 'channels', tab: 'channels', label: 'Сообщества', icon: Users },

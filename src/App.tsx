@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ChatProvider, useChat } from './context/ChatContext';
+import { VideoProvider } from './context/VideoContext';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { Sidebar } from './components/navigation/Sidebar';
 import { MobileNav } from './components/navigation/MobileNav';
 import { ChatList } from './components/chats/ChatList';
 import { ChatWindow } from './components/chats/ChatWindow';
 import { SocialFeed } from './components/feed/SocialFeed';
+import { MenderVideoView } from './components/video/MenderVideoView';
 import { CallsView } from './components/calls/CallsView';
 import { ChannelsView } from './components/channels/ChannelsView';
 import { SettingsView } from './components/settings/SettingsView';
@@ -16,7 +18,7 @@ import { WallpaperStudioModal } from './components/wallpapers/WallpaperStudioMod
 import { SearchModal } from './components/search/SearchModal';
 import { UserProfileModal } from './components/profile/UserProfileModal';
 
-import { Search, Sparkles, ChevronDown, MessageSquare, PhoneCall, Sun, Moon, Palette } from 'lucide-react';
+import { Search, Sparkles, ChevronDown, MessageSquare, PhoneCall, Sun, Moon, Palette, Film } from 'lucide-react';
 
 const MainMessenger: React.FC = () => {
   const {
@@ -133,6 +135,15 @@ const MainMessenger: React.FC = () => {
 
           <button
             type="button"
+            onClick={() => setActiveTab('video')}
+            className="hidden sm:flex p-1.5 rounded-full hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#0077FF] transition-colors cursor-pointer"
+            title="Mender Video"
+          >
+            <Film className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('calls')}
             className="hidden sm:flex p-1.5 rounded-full hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#0077FF] transition-colors cursor-pointer"
             title="Звонки"
@@ -202,6 +213,7 @@ const MainMessenger: React.FC = () => {
           )}
 
           {activeTab === 'feed' && <SocialFeed />}
+          {activeTab === 'video' && <MenderVideoView />}
           {activeTab === 'calls' && <CallsView />}
           {activeTab === 'channels' && <ChannelsView />}
           {activeTab === 'settings' && <SettingsView />}
@@ -235,8 +247,11 @@ export default function App() {
   return (
     <AuthProvider>
       <ChatProvider>
-        <MainMessenger />
+        <VideoProvider>
+          <MainMessenger />
+        </VideoProvider>
       </ChatProvider>
     </AuthProvider>
   );
 }
+
