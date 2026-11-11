@@ -1,0 +1,23 @@
+{
+  "appId": "app.mender.messenger",
+  "appName": "Mender",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "android": {
+    "buildOptions": {
+      "releaseType": "APK",
+      "signingType": "apksigner"
+    },
+    "minWebViewVersion": 80,
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "backgroundColor": "#0077FF",
+      "showSpinner": false
+    }
+  }
+}

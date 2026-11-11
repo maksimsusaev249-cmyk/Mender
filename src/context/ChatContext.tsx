@@ -295,6 +295,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const activeCallRef = useRef<CallSession | null>(null);
+  const isAudioMutedRef = useRef<boolean>(false);
   const isVideoMutedRef = useRef<boolean>(false);
   const isScreenSharingRef = useRef<boolean>(false);
   const commentUnsubsRef = useRef<Record<string, () => void>>({});
@@ -306,6 +307,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     activeCallRef.current = activeCall;
   }, [activeCall]);
+
+  useEffect(() => {
+    isAudioMutedRef.current = isAudioMuted;
+  }, [isAudioMuted]);
 
   useEffect(() => {
     isVideoMutedRef.current = isVideoMuted;
@@ -2322,12 +2327,37 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return needsRenegotiation;
   };
 
+  // Attach or replace outgoing audio track on the RTCPeerConnection
+  const setOutgoingAudioTrack = async (
+    pc: RTCPeerConnection,
+    newAudioTrack: MediaStreamTrack | null
+  ): Promise<void> => {
+    const audioTransceiver = pc
+      .getTransceivers()
+      .find(
+        t =>
+          t.receiver.track?.kind === 'audio' ||
+          t.sender.track?.kind === 'audio'
+      );
+    const existingAudioSender =
+      pc.getSenders().find(s => s.track?.kind === 'audio') || audioTransceiver?.sender;
+
+    if (existingAudioSender) {
+      try {
+        await existingAudioSender.replaceTrack(newAudioTrack);
+      } catch {
+        // ignore replaceTrack error
+      }
+    }
+  };
+
   // Send SDP renegotiation offer or state update to Firestore so both caller and callee stay in sync
   const updateCallSignalingState = async (
     call: CallSession,
     options: {
       forceRenegotiate?: boolean;
       videoEnabled?: boolean;
+      audioMuted?: boolean;
       screenSharing?: boolean;
       screenSurface?: 'monitor' | 'window' | 'browser';
     }
@@ -2343,6 +2373,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const nextCalleeVideo = !isCaller
       ? (options.videoEnabled ?? !isVideoMutedRef.current)
       : (call.calleeVideoEnabled ?? false);
+
+    const nextCallerAudioMuted = isCaller
+      ? (options.audioMuted ?? isAudioMutedRef.current)
+      : (call.callerAudioMuted ?? false);
+    const nextCalleeAudioMuted = !isCaller
+      ? (options.audioMuted ?? isAudioMutedRef.current)
+      : (call.calleeAudioMuted ?? false);
 
     const nextCallerScreen = isCaller
       ? (options.screenSharing ?? isScreenSharingRef.current)
@@ -2381,6 +2418,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isScreenSharing: anyScreenSharing,
       callerVideoEnabled: nextCallerVideo,
       calleeVideoEnabled: nextCalleeVideo,
+      callerAudioMuted: nextCallerAudioMuted,
+      calleeAudioMuted: nextCalleeAudioMuted,
       callerScreenSharing: nextCallerScreen,
       calleeScreenSharing: nextCalleeScreen,
       offerSenderId: nextOfferSenderId,
@@ -2471,6 +2510,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             isScreenSharing: data.isScreenSharing,
             callerVideoEnabled: data.callerVideoEnabled ?? false,
             calleeVideoEnabled: data.calleeVideoEnabled ?? false,
+            callerAudioMuted: data.callerAudioMuted ?? false,
+            calleeAudioMuted: data.calleeAudioMuted ?? false,
             callerScreenSharing: data.callerScreenSharing ?? false,
             calleeScreenSharing: data.calleeScreenSharing ?? false,
             offerSenderId: offerSender,
@@ -2630,6 +2671,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isScreenSharing: false,
       callerVideoEnabled: hasInitialVideo,
       calleeVideoEnabled: false,
+      callerAudioMuted: false,
+      calleeAudioMuted: false,
       callerScreenSharing: false,
       calleeScreenSharing: false,
       offerSenderId: myUid,
@@ -2772,6 +2815,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         status: 'connected',
         callerVideoEnabled: call.callerVideoEnabled ?? (call.type === 'video'),
         calleeVideoEnabled: hasInitialVideo,
+        callerAudioMuted: call.callerAudioMuted ?? false,
+        calleeAudioMuted: false,
         callerScreenSharing: call.callerScreenSharing ?? call.isScreenSharing,
         calleeScreenSharing: false,
         offerSenderId: call.offerSenderId || call.callerId,
@@ -2784,6 +2829,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         status: 'connected',
         callerVideoEnabled: updatedCall.callerVideoEnabled,
         calleeVideoEnabled: updatedCall.calleeVideoEnabled,
+        callerAudioMuted: updatedCall.callerAudioMuted,
+        calleeAudioMuted: updatedCall.calleeAudioMuted,
         callerScreenSharing: updatedCall.callerScreenSharing,
         calleeScreenSharing: updatedCall.calleeScreenSharing,
         offerSenderId: updatedCall.offerSenderId,
@@ -2830,24 +2877,53 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     cleanupCallResources();
   };
 
-  const toggleMuteAudio = () => {
-    const audioTracks = [
+  const applyLocalAudioMuteState = async (targetMuted: boolean, syncToFirestore: boolean) => {
+    const pc = peerConnectionRef.current;
+    const currentCall = activeCallRef.current || activeCall;
+
+    const allLocalAudioTracks = [
       ...(localStreamRef.current?.getAudioTracks() || []),
       ...(cameraStreamRef.current?.getAudioTracks() || []),
+      ...(screenStreamRef.current?.getAudioTracks() || []),
     ];
-    if (audioTracks.length === 0) return;
-    const nextEnabled = isAudioMuted;
-    audioTracks.forEach(track => {
-      track.enabled = nextEnabled;
+
+    allLocalAudioTracks.forEach(track => {
+      track.enabled = !targetMuted;
     });
-    setIsAudioMuted(!nextEnabled);
+
+    if (pc) {
+      pc.getSenders().forEach(sender => {
+        if (sender.track && sender.track.kind === 'audio') {
+          sender.track.enabled = !targetMuted;
+        }
+      });
+
+      const primaryAudioTrack =
+        allLocalAudioTracks.find(t => t.readyState === 'live') || null;
+      await setOutgoingAudioTrack(pc, targetMuted ? null : primaryAudioTrack);
+    }
+
+    isAudioMutedRef.current = targetMuted;
+    setIsAudioMuted(targetMuted);
+
+    if (syncToFirestore && currentCall) {
+      await updateCallSignalingState(currentCall, {
+        forceRenegotiate: false,
+        audioMuted: targetMuted,
+      });
+    }
+  };
+
+  const toggleMuteAudio = () => {
+    const nextMuted = !isAudioMutedRef.current;
+    applyLocalAudioMuteState(nextMuted, true).catch(() => {});
   };
 
   const toggleMuteVideo = async () => {
     const currentCall = activeCallRef.current || activeCall;
     const pc = peerConnectionRef.current;
 
-    // If camera is currently ON -> turn it OFF
+    // If camera is currently ON -> turn it OFF and also mute microphone so nothing is heard
     if (!isVideoMutedRef.current) {
       if (cameraStreamRef.current) {
         cameraStreamRef.current.getVideoTracks().forEach(track => {
@@ -2875,10 +2951,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsVideoMuted(true);
       isVideoMutedRef.current = true;
 
+      // Also mute outgoing microphone audio when camera is switched off so peer hears nothing
+      await applyLocalAudioMuteState(true, false);
+
       if (currentCall) {
         await updateCallSignalingState(currentCall, {
           forceRenegotiate: false,
           videoEnabled: false,
+          audioMuted: true,
         });
       }
       return;
@@ -2921,6 +3001,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsVideoMuted(false);
       isVideoMutedRef.current = false;
 
+      // Restore microphone audio when turning camera back on
+      await applyLocalAudioMuteState(false, false);
+
       // If not currently sharing screen, send the camera track over WebRTC and display in main localStream
       if (!isScreenSharingRef.current) {
         localStreamRef.current = updatedCameraStream;
@@ -2935,12 +3018,14 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await updateCallSignalingState(currentCall, {
             forceRenegotiate: needsRenegotiation,
             videoEnabled: true,
+            audioMuted: false,
           });
         }
       } else if (currentCall) {
         await updateCallSignalingState(currentCall, {
           forceRenegotiate: false,
           videoEnabled: true,
+          audioMuted: false,
         });
       }
     } catch {
@@ -2953,6 +3038,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLocalCameraStream(fallbackStream);
         setIsVideoMuted(false);
         isVideoMutedRef.current = false;
+        await applyLocalAudioMuteState(false, false);
 
         if (!isScreenSharingRef.current) {
           localStreamRef.current = fallbackStream;
@@ -2965,6 +3051,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await updateCallSignalingState(currentCall, {
             forceRenegotiate: true,
             videoEnabled: true,
+            audioMuted: false,
           });
         }
       } catch {

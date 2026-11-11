@@ -1253,14 +1253,22 @@ export const SettingsView: React.FC = () => {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <a
+                    href="/Mender-Lite-Android.apk"
+                    download="Mender-Lite-Android.apk"
+                    className="px-4 py-2 rounded-xl bg-[#0077FF] hover:bg-[#0066EA] text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-95 transition-all"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    <span>Скачать APK (Lite ≤ 20 МБ)</span>
+                  </a>
                   {isInstallable && (
                     <button
                       type="button"
                       onClick={() => installApp()}
-                      className="px-4 py-2 rounded-xl bg-[#0077FF] hover:bg-[#0066EA] text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-95 transition-all"
+                      className="px-3.5 py-2 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95 transition-all"
                     >
                       <Download className="w-4 h-4" />
-                      <span>Установить 1 кликом</span>
+                      <span>Установить PWA</span>
                     </button>
                   )}
                   <button
@@ -1269,7 +1277,7 @@ export const SettingsView: React.FC = () => {
                     className="px-3.5 py-2 rounded-xl bg-white hover:bg-[#F4F8FF] border border-[#0077FF]/40 text-[#0077FF] text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs transition-all"
                   >
                     <Monitor className="w-4 h-4" />
-                    <span>Инструкция: Создать ярлык</span>
+                    <span>Создать ярлык / Инфо</span>
                   </button>
                 </div>
               </div>
@@ -2097,14 +2105,37 @@ export const SettingsView: React.FC = () => {
                 </ol>
               </div>
 
+              <div className="p-3.5 rounded-xl bg-[#EBF3FF] border border-[#0077FF]/30 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-bold text-[#0B1E36] flex items-center gap-1.5">
+                    <Smartphone className="w-4 h-4 text-[#0077FF]" />
+                    <span>Android APK — Облегчённая сборка (Lite ≤ 20 МБ):</span>
+                  </div>
+                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-[#0077FF] text-white">
+                    ~1.5 МБ · arm64-v8a
+                  </span>
+                </div>
+                <p className="text-[#2C3138] leading-relaxed">
+                  Компактная сборка без лишних движков (использует системный Android WebView + сжатие ресурсов R8/Deflate), весит менее 20 МБ:
+                </p>
+                <a
+                  href="/Mender-Lite-Android.apk"
+                  download="Mender-Lite-Android.apk"
+                  className="v7-btn justify-center py-2 text-xs w-full"
+                >
+                  <Download className="w-4 h-4 shrink-0" />
+                  <span>Скачать Mender-Lite-Android.apk (≤ 20 МБ)</span>
+                </a>
+              </div>
+
               <div className="p-3.5 rounded-xl bg-[#F7F8FA] border border-[#E1E3E6] space-y-2">
                 <div className="font-bold text-[#19191A] flex items-center gap-1.5">
                   <Smartphone className="w-4 h-4 text-[#0077FF]" />
-                  <span>Инструкция для телефонов (Android / iOS):</span>
+                  <span>Быстрая установка через браузер (Android / iOS):</span>
                 </div>
                 <p className="text-[#505965] leading-relaxed">
-                  • <strong>Android:</strong> Нажмите <strong>«⋮»</strong> в углу браузера → <strong>«Добавить на главный экран»</strong>.<br />
-                  • <strong>iPhone (Safari):</strong> Нажмите иконку <strong>«Поделиться»</strong> (квадрат со стрелкой вверх) → <strong>«На экран Домой»</strong>.
+                  • <strong>Android:</strong> Скачайте <strong>Mender-Lite-Android.apk</strong> выше или нажмите <strong>«⋮»</strong> → <strong>«Добавить на главный экран»</strong>.<br />
+                  • <strong>iPhone (Safari):</strong> Нажмите иконку <strong>«Поделиться»</strong> → <strong>«На экран Домой»</strong>.
                 </p>
               </div>
             </div>

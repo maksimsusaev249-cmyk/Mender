@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
+    "build:apk": "vite build && node scripts/build-apk-lite.mjs",
     "deploy": "vite build && npx wrangler deploy",
     "deploy:pages": "vite build && npx wrangler pages deploy dist --project-name=mender"
   },

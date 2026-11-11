@@ -243,33 +243,33 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
           </div>
 
           {/* Video Details & Action Bar */}
-          <div className="bg-white border border-[#E1E3E6] rounded-xl p-4 sm:p-5 space-y-4">
-            <div className="space-y-2">
-              <h1 className="text-lg sm:text-xl font-bold text-[#19191A] leading-snug">
+          <div className="bg-white border border-[#E1E3E6] rounded-xl p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">
+            <div className="space-y-2.5">
+              <h1 className="text-base sm:text-xl font-bold text-[#19191A] leading-snug">
                 {video.title}
               </h1>
 
               {/* Metadata line: Views · Date · Category · Duration */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-[#818C99] tabular-nums">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-0.5">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs text-[#818C99] tabular-nums">
                   <span className="inline-flex items-center gap-1 font-semibold text-[#19191A]">
                     <Eye className="w-4 h-4 text-[#0077FF]" />
-                    {video.viewsCount} просмотров
+                    {video.viewsCount} просм.
                   </span>
                   <span aria-hidden="true">·</span>
                   <span>{formatVideoDate(video.createdAt)}</span>
                   <span aria-hidden="true">·</span>
                   <span className="font-medium text-[#19191A]">{video.category}</span>
                   <span aria-hidden="true">·</span>
-                  <span>Длительность: {formatVideoDuration(video.duration)}</span>
+                  <span>{formatVideoDuration(video.duration)}</span>
                 </div>
 
-                {/* Action Buttons */}
-                <div className="flex flex-wrap items-center gap-2">
+                {/* Action Buttons — Horizontal touch scroll on mobile */}
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5 -mx-1 px-1">
                   <button
                     type="button"
                     onClick={() => toggleLikeVideo(video)}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors tabular-nums ${
+                    className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors tabular-nums shrink-0 ${
                       isLiked
                         ? 'bg-[#FFEAEA] text-[#E64646] border border-[#FFCCCC]'
                         : 'bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A]'
@@ -282,7 +282,7 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
                   <button
                     type="button"
                     onClick={() => onOpenPlaylistModal(video)}
-                    className="px-3.5 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+                    className="px-3.5 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shrink-0"
                   >
                     <ListPlus className="w-4 h-4 text-[#0077FF]" />
                     <span>В плейлист</span>
@@ -293,7 +293,7 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
                       <button
                         type="button"
                         onClick={() => openUploadStudio(video)}
-                        className="px-3 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                        className="px-3 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A] text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                         <span>Редактировать</span>
@@ -303,13 +303,13 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
                         <button
                           type="button"
                           onClick={() => setConfirmDeleteVideo(true)}
-                          className="px-3 py-2 rounded-lg bg-[#FFEAEA] hover:bg-[#FFD6D6] text-[#E64646] text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                          className="px-3 py-2 rounded-lg bg-[#FFEAEA] hover:bg-[#FFD6D6] text-[#E64646] text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           <span>Удалить</span>
                         </button>
                       ) : (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
                             onClick={() => deleteVideo(video.videoId)}
@@ -337,7 +337,7 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
                           label: `Видео «${video.title}»`,
                         })
                       }
-                      className="px-3 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#FFEAEA] text-[#818C99] hover:text-[#E64646] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+                      className="px-3 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#FFEAEA] text-[#818C99] hover:text-[#E64646] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shrink-0"
                       title="Пожаловаться на нарушение"
                     >
                       <Flag className="w-3.5 h-3.5" />
@@ -349,7 +349,7 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
             </div>
 
             {/* Author Strip: Avatar, Name, @username, Followers, Subscribe & Message Buttons */}
-            <div className="pt-3 border-t border-[#E1E3E6] flex flex-wrap items-center justify-between gap-3">
+            <div className="pt-3 border-t border-[#E1E3E6] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div
                 onClick={() => openAuthorProfile(video.authorId)}
                 className="flex items-center gap-3 cursor-pointer group"
@@ -358,23 +358,23 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
                   src={video.authorAvatar}
                   alt={video.authorName}
                   referrerPolicy="no-referrer"
-                  className="w-11 h-11 rounded-full object-cover border border-[#E1E3E6] group-hover:ring-2 group-hover:ring-[#0077FF] transition-all"
+                  className="w-11 h-11 rounded-full object-cover border border-[#E1E3E6] group-hover:ring-2 group-hover:ring-[#0077FF] transition-all shrink-0"
                 />
-                <div>
-                  <div className="text-sm font-bold text-[#19191A] group-hover:text-[#0077FF] transition-colors">
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-[#19191A] group-hover:text-[#0077FF] transition-colors truncate">
                     {video.authorName}
                   </div>
-                  <div className="text-xs text-[#818C99] tabular-nums">
+                  <div className="text-xs text-[#818C99] tabular-nums truncate">
                     @{video.authorUsername} · {followersCount} подписчиков
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => openAuthorProfile(video.authorId)}
-                  className="px-3 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A] text-xs font-semibold cursor-pointer transition-colors"
+                  className="flex-1 sm:flex-initial px-3 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A] text-xs font-semibold cursor-pointer transition-colors text-center"
                 >
                   Профиль автора
                 </button>
@@ -384,7 +384,7 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
                     <button
                       type="button"
                       onClick={() => toggleSubscription(video.authorId, 'user')}
-                      className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                      className={`flex-1 sm:flex-initial px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
                         subscribed
                           ? 'bg-[#E5EBF1] text-[#0077FF]'
                           : 'bg-[#0077FF] hover:bg-[#0066EA] text-white'
@@ -401,10 +401,10 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
                     <button
                       type="button"
                       onClick={handleMessageAuthor}
-                      className="px-3.5 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] border border-[#E1E3E6] text-[#19191A] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
+                      className="flex-1 sm:flex-initial px-3.5 py-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] border border-[#E1E3E6] text-[#19191A] text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                     >
                       <MessageSquare className="w-3.5 h-3.5 text-[#0077FF]" />
-                      <span>Написать сообщение</span>
+                      <span>Сообщение</span>
                     </button>
                   </>
                 )}

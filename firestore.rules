@@ -321,6 +321,7 @@ service cloud.firestore {
         'callId', 'chatId', 'callerId', 'callerName', 'callerAvatar',
         'calleeId', 'type', 'status', 'isScreenSharing',
         'callerVideoEnabled', 'calleeVideoEnabled',
+        'callerAudioMuted', 'calleeAudioMuted',
         'callerScreenSharing', 'calleeScreenSharing',
         'offerSenderId', 'screenShareSurface',
         'offerSdp', 'offerType', 'answerSdp', 'answerType',
@@ -337,6 +338,8 @@ service cloud.firestore {
       && data.isScreenSharing is bool
       && (!('callerVideoEnabled' in data) || data.callerVideoEnabled is bool)
       && (!('calleeVideoEnabled' in data) || data.calleeVideoEnabled is bool)
+      && (!('callerAudioMuted' in data) || data.callerAudioMuted is bool)
+      && (!('calleeAudioMuted' in data) || data.calleeAudioMuted is bool)
       && (!('callerScreenSharing' in data) || data.callerScreenSharing is bool)
       && (!('calleeScreenSharing' in data) || data.calleeScreenSharing is bool)
       && (!('offerSenderId' in data) || isValidId(data.offerSenderId))
@@ -1100,6 +1103,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'status', 'isScreenSharing', 'callerVideoEnabled', 'calleeVideoEnabled',
+          'callerAudioMuted', 'calleeAudioMuted',
           'callerScreenSharing', 'calleeScreenSharing', 'offerSenderId',
           'screenShareSurface', 'offerSdp', 'offerType', 'answerSdp', 'answerType', 'updatedAt'
         ]);

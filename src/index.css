@@ -85,6 +85,20 @@ body {
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
 }
 
+.v7-input.v7-input-search {
+  padding-left: 38px !important;
+  padding-right: 34px !important;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 .v7-input::placeholder {
   color: #818C99;
 }

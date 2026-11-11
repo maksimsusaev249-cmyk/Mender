@@ -98,6 +98,11 @@ export const CallModal: React.FC = () => {
           activeCall.isScreenSharing)
   );
 
+  const remoteAudioMuted = Boolean(
+    activeCall &&
+      (isCaller ? activeCall.calleeAudioMuted : activeCall.callerAudioMuted)
+  );
+
   const liveRemoteVideoTracks =
     remoteStream?.getVideoTracks().filter(t => t.readyState === 'live' && !t.muted) || [];
 
@@ -147,44 +152,49 @@ export const CallModal: React.FC = () => {
     }
   }, [isScreenSharing, remoteScreenSharing]);
 
-  // Bind streams to video elements across PIP and Grid modes
+  // Bind strictly VIDEO-ONLY streams to video elements across PIP and Grid modes so <video> never leaks audio
   useEffect(() => {
-    const primaryStream = isSwappedStage ? activeLocalVisualStream : remoteStream;
-    const secondaryStream = isSwappedStage ? remoteStream : activeLocalVisualStream;
+    const toVideoOnlyStream = (s: MediaStream | null): MediaStream | null => {
+      if (!s) return null;
+      const vTracks = s.getVideoTracks().filter(t => t.readyState === 'live');
+      if (vTracks.length === 0) return null;
+      return new MediaStream(vTracks);
+    };
 
-    if (mainVideoRef.current) {
-      if (mainVideoRef.current.srcObject !== (primaryStream || null)) {
-        mainVideoRef.current.srcObject = primaryStream || null;
-      }
-      mainVideoRef.current.play().catch(() => {});
-    }
+    const primaryVideoStream = toVideoOnlyStream(
+      isSwappedStage ? activeLocalVisualStream : remoteStream
+    );
+    const secondaryVideoStream = toVideoOnlyStream(
+      isSwappedStage ? remoteStream : activeLocalVisualStream
+    );
+    const remoteVideoOnly = toVideoOnlyStream(remoteStream);
+    const localVideoOnly = toVideoOnlyStream(activeLocalVisualStream);
+    const camPreviewVideoOnly = toVideoOnlyStream(localCameraStream);
 
-    if (pipVideoRef.current) {
-      if (pipVideoRef.current.srcObject !== (secondaryStream || null)) {
-        pipVideoRef.current.srcObject = secondaryStream || null;
-      }
-      pipVideoRef.current.play().catch(() => {});
-    }
+    const bindSilentVideo = (el: HTMLVideoElement | null, targetStream: MediaStream | null) => {
+      if (!el) return;
+      el.muted = true;
+      el.volume = 0;
+      const currentTracks = (el.srcObject as MediaStream | null)?.getVideoTracks() || [];
+      const nextTracks = targetStream?.getVideoTracks() || [];
+      const sameTrack =
+        currentTracks.length === nextTracks.length &&
+        currentTracks.every((t, i) => t.id === nextTracks[i]?.id);
 
-    if (gridRemoteVideoRef.current) {
-      if (gridRemoteVideoRef.current.srcObject !== (remoteStream || null)) {
-        gridRemoteVideoRef.current.srcObject = remoteStream || null;
+      if (!sameTrack || (el.srcObject === null && targetStream !== null) || (el.srcObject !== null && targetStream === null)) {
+        el.srcObject = targetStream;
       }
-      gridRemoteVideoRef.current.play().catch(() => {});
-    }
+      if (targetStream) {
+        el.play().catch(() => {});
+      }
+    };
 
-    if (gridLocalVideoRef.current) {
-      if (gridLocalVideoRef.current.srcObject !== (activeLocalVisualStream || null)) {
-        gridLocalVideoRef.current.srcObject = activeLocalVisualStream || null;
-      }
-      gridLocalVideoRef.current.play().catch(() => {});
-    }
-
-    if (miniCamPreviewRef.current && hasSimultaneousCamDuringScreenShare && localCameraStream) {
-      if (miniCamPreviewRef.current.srcObject !== localCameraStream) {
-        miniCamPreviewRef.current.srcObject = localCameraStream;
-      }
-      miniCamPreviewRef.current.play().catch(() => {});
+    bindSilentVideo(mainVideoRef.current, primaryVideoStream);
+    bindSilentVideo(pipVideoRef.current, secondaryVideoStream);
+    bindSilentVideo(gridRemoteVideoRef.current, remoteVideoOnly);
+    bindSilentVideo(gridLocalVideoRef.current, localVideoOnly);
+    if (hasSimultaneousCamDuringScreenShare) {
+      bindSilentVideo(miniCamPreviewRef.current, camPreviewVideoOnly);
     }
   }, [
     remoteStream,
@@ -196,26 +206,46 @@ export const CallModal: React.FC = () => {
     isSwappedStage,
     layoutMode,
     activeCall?.status,
-     activeCall?.updatedAt,
+    activeCall?.updatedAt,
   ]);
 
-  // Attach remote stream to dedicated audio element for guaranteed real-time voice
+  // Attach remote audio tracks to dedicated audio element and enforce 100% silence when mic or speaker is off
   useEffect(() => {
-    if (remoteAudioRef.current && remoteStream) {
-      if (remoteAudioRef.current.srcObject !== remoteStream) {
-        remoteAudioRef.current.srcObject = remoteStream;
-      }
-      remoteAudioRef.current.volume = isSpeakerOn ? 1.0 : 0.25;
-      remoteAudioRef.current.play().catch(() => {});
-    }
-  }, [remoteStream, activeCall, isSpeakerOn]);
+    const audioEl = remoteAudioRef.current;
+    if (!audioEl) return;
 
-  // Update speaker volume immediately when toggled
-  useEffect(() => {
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.volume = isSpeakerOn ? 1.0 : 0.25;
+    const shouldSilenceRemote = !isSpeakerOn || remoteAudioMuted;
+
+    if (!remoteStream || shouldSilenceRemote) {
+      audioEl.muted = true;
+      audioEl.volume = 0;
+      audioEl.pause();
+      return;
     }
-  }, [isSpeakerOn]);
+
+    const liveAudioTracks = remoteStream
+      .getAudioTracks()
+      .filter(t => t.readyState === 'live' && t.enabled);
+
+    if (liveAudioTracks.length === 0) {
+      audioEl.muted = true;
+      audioEl.volume = 0;
+      return;
+    }
+
+    const currentAudioTracks = (audioEl.srcObject as MediaStream | null)?.getAudioTracks() || [];
+    const sameAudio =
+      currentAudioTracks.length === liveAudioTracks.length &&
+      currentAudioTracks.every((t, i) => t.id === liveAudioTracks[i]?.id);
+
+    if (!sameAudio) {
+      audioEl.srcObject = new MediaStream(liveAudioTracks);
+    }
+
+    audioEl.muted = false;
+    audioEl.volume = 1.0;
+    audioEl.play().catch(() => {});
+  }, [remoteStream, activeCall, isSpeakerOn, remoteAudioMuted]);
 
   // Incoming Call Banner (shows caller name, avatar, and Accept / Decline buttons)
   if (incomingCall && !activeCall) {
@@ -347,6 +377,12 @@ export const CallModal: React.FC = () => {
                       Экран
                     </span>
                   )}
+                  {remoteAudioMuted && (
+                    <span className="inline-flex items-center gap-1 text-rose-400 text-[11px]">
+                      <MicOff className="w-3.5 h-3.5" />
+                      <span>Без звука</span>
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -441,6 +477,12 @@ export const CallModal: React.FC = () => {
               <p className="text-xs sm:text-sm text-[#B4BCE6] max-w-md">
                 {activeCall.status === 'ringing'
                   ? 'Вызов собеседника в реальном времени (WebRTC)...'
+                  : remoteAudioMuted
+                  ? 'Собеседник выключил микрофон / камеру — звук не передаётся'
+                  : isAudioMuted
+                  ? 'Ваш микрофон выключен — собеседник вас не слышит'
+                  : !isSpeakerOn
+                  ? 'Динамик выключен — звук собеседника заглушён'
                   : activeCall.isScreenSharing
                   ? 'Демонстрация экрана активна'
                   : 'Соединение WebRTC установлено — вы на связи'}

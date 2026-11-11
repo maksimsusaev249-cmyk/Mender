@@ -215,6 +215,8 @@ export interface CallSession {
   isScreenSharing: boolean;
   callerVideoEnabled?: boolean;
   calleeVideoEnabled?: boolean;
+  callerAudioMuted?: boolean;
+  calleeAudioMuted?: boolean;
   callerScreenSharing?: boolean;
   calleeScreenSharing?: boolean;
   offerSenderId?: string;

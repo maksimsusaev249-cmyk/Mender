@@ -123,114 +123,35 @@ export const MenderVideoView: React.FC = () => {
     : [];
 
   return (
-    <div className="flex-1 bg-[#EDEEF0] overflow-y-auto p-3 sm:p-5 text-[#19191A] select-none">
-      <div className="max-w-7xl mx-auto space-y-4">
-        {/* Top Mender Video Navigation Bar */}
-        <div className="bg-white border border-[#E1E3E6] rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 relative">
-          <div className="flex items-center gap-2 sm:gap-5 flex-wrap">
+    <div className="flex-1 bg-[#EDEEF0] overflow-y-auto p-2.5 sm:p-5 pb-20 md:pb-6 text-[#19191A] select-none">
+      <div className="max-w-7xl mx-auto space-y-3 sm:space-y-4">
+        {/* Top Mender Video Navigation Bar — Compact 2-row on Mobile, 1-row on Desktop */}
+        <div className="bg-white border border-[#E1E3E6] rounded-xl p-2.5 sm:px-4 sm:py-3 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5 relative">
+          {/* Top Row on Mobile: Logo + Bell + Upload CTA */}
+          <div className="flex items-center justify-between gap-2 w-full lg:w-auto">
             <button
               type="button"
               onClick={() => {
                 setOpenedPlaylist(null);
                 setVideoSubView('home');
               }}
-              className="flex items-center gap-2 cursor-pointer"
+              className="flex items-center gap-2 cursor-pointer shrink-0"
             >
-              <div className="w-8 h-8 rounded-lg bg-[#0077FF] text-white flex items-center justify-center shadow-xs">
+              <div className="w-8 h-8 rounded-lg bg-[#0077FF] text-white flex items-center justify-center shadow-xs shrink-0">
                 <Film className="w-4 h-4" />
               </div>
-              <span className="font-bold text-base tracking-tight text-[#19191A] whitespace-nowrap">
+              <span className="font-bold text-sm sm:text-base tracking-tight text-[#19191A] whitespace-nowrap">
                 Mender Video
               </span>
             </button>
 
-            <nav className="flex items-center gap-1 sm:gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenedPlaylist(null);
-                  setVideoSubView('home');
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap ${
-                  videoSubView === 'home'
-                    ? 'bg-[#E5EBF1] text-[#0077FF]'
-                    : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
-                }`}
-              >
-                Все видео
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenedPlaylist(null);
-                  setVideoSubView('playlists');
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap ${
-                  videoSubView === 'playlists'
-                    ? 'bg-[#E5EBF1] text-[#0077FF]'
-                    : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
-                }`}
-              >
-                <ListVideo className="w-3.5 h-3.5" />
-                <span>Плейлисты</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenedPlaylist(null);
-                  setVideoSubView('my_videos');
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap ${
-                  videoSubView === 'my_videos'
-                    ? 'bg-[#E5EBF1] text-[#0077FF]'
-                    : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
-                }`}
-              >
-                <FolderOpen className="w-3.5 h-3.5" />
-                <span>Мои видео и черновики ({myVideos.length})</span>
-              </button>
-
-              {firebaseUser && (
-                <button
-                  type="button"
-                  onClick={() => openAuthorProfile(firebaseUser.uid)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap ${
-                    videoSubView === 'author'
-                      ? 'bg-[#E5EBF1] text-[#0077FF]'
-                      : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
-                  }`}
-                >
-                  <User className="w-3.5 h-3.5" />
-                  <span>Профиль автора</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setVideoSubView('analytics')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap ${
-                  videoSubView === 'analytics'
-                    ? 'bg-[#E5EBF1] text-[#0077FF]'
-                    : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
-                }`}
-              >
-                <BarChart3 className="w-3.5 h-3.5" />
-                <span>Аналитика</span>
-              </button>
-            </nav>
-          </div>
-
-          {/* Right Controls: Notifications Bell & Upload CTA */}
-          <div className="flex items-center gap-2">
-            {/* Notifications Button */}
-            <div className="relative">
+            {/* Mobile Right Controls (visible on < lg) */}
+            <div className="flex lg:hidden items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowNotifPanel(prev => !prev)}
                 className="p-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A] relative cursor-pointer transition-colors"
-                title="Уведомления о подписчиках, комментариях и реакциях"
+                title="Уведомления"
               >
                 <Bell className="w-4 h-4" />
                 {unreadNotificationsCount > 0 && (
@@ -240,92 +161,111 @@ export const MenderVideoView: React.FC = () => {
                 )}
               </button>
 
-              {showNotifPanel && (
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-[#E1E3E6] rounded-2xl shadow-2xl z-50 overflow-hidden">
-                  <div className="px-4 py-3 border-b border-[#E1E3E6] flex items-center justify-between">
-                    <span className="text-xs font-bold text-[#19191A]">
-                      Уведомления Mender Video ({unreadNotificationsCount} новых)
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {unreadNotificationsCount > 0 && (
-                        <button
-                          type="button"
-                          onClick={markAllNotificationsRead}
-                          className="text-[11px] text-[#0077FF] hover:underline font-medium cursor-pointer"
-                        >
-                          Прочитать все
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setShowNotifPanel(false)}
-                        className="p-1 rounded hover:bg-[#F0F2F5] text-[#818C99]"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="max-h-96 overflow-y-auto divide-y divide-[#E1E3E6]">
-                    {videoNotifications.length === 0 ? (
-                      <div className="p-6 text-center text-xs text-[#818C99]">
-                        Уведомлений пока нет. Здесь появятся новые подписчики, комментарии, ответы и лайки ваших видео.
-                      </div>
-                    ) : (
-                      videoNotifications.map(notif => {
-                        let actionText = '';
-                        if (notif.type === 'new_subscriber') {
-                          actionText = 'подписался(-ась) на ваш профиль автора';
-                        } else if (notif.type === 'video_like') {
-                          actionText = `оценил(-а) ваше видео «${notif.videoTitle}»`;
-                        } else if (notif.type === 'new_comment') {
-                          actionText = `оставил(-а) комментарий к видео «${notif.videoTitle}»: "${notif.commentText}"`;
-                        } else if (notif.type === 'comment_reply') {
-                          actionText = `ответил(-а) на ваш комментарий под «${notif.videoTitle}»: "${notif.commentText}"`;
-                        } else if (notif.type === 'comment_like') {
-                          actionText = `оценил(-а) ваш комментарий: "${notif.commentText}"`;
-                        }
-
-                        return (
-                          <div
-                            key={notif.notificationId}
-                            onClick={() => {
-                              markNotificationRead(notif.notificationId);
-                              setShowNotifPanel(false);
-                              if (notif.videoId) {
-                                openVideoPlayer(notif.videoId);
-                              } else {
-                                openAuthorProfile(notif.actorId);
-                              }
-                            }}
-                            className={`p-3 flex items-start gap-3 cursor-pointer hover:bg-[#F7F8FA] transition-colors ${
-                              !notif.isRead ? 'bg-[#F0F6FF]' : 'bg-white'
-                            }`}
-                          >
-                            <img
-                              src={notif.actorAvatar}
-                              alt={notif.actorName}
-                              className="w-9 h-9 rounded-full object-cover shrink-0 border border-[#E1E3E6]"
-                            />
-                            <div className="flex-1 min-w-0 text-xs">
-                              <p className="text-[#19191A] leading-snug">
-                                <strong className="font-bold text-[#2A5885]">
-                                  {notif.actorName}
-                                </strong>{' '}
-                                {actionText}
-                              </p>
-                              <span className="text-[10px] text-[#818C99] mt-0.5 block">
-                                {formatVideoDate(notif.createdAt)}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={() => openUploadStudio(null)}
+                className="px-3 py-2 rounded-lg bg-[#0077FF] hover:bg-[#0066EA] text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+              >
+                <Upload className="w-3.5 h-3.5 shrink-0" />
+                <span>Опубликовать</span>
+              </button>
             </div>
+          </div>
+
+          {/* Horizontal Scrollable Pill Navigation Tabs (1 line on Mobile & Desktop) */}
+          <nav className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 py-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                setOpenedPlaylist(null);
+                setVideoSubView('home');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                videoSubView === 'home'
+                  ? 'bg-[#E5EBF1] text-[#0077FF]'
+                  : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
+              }`}
+            >
+              Все видео
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setOpenedPlaylist(null);
+                setVideoSubView('playlists');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                videoSubView === 'playlists'
+                  ? 'bg-[#E5EBF1] text-[#0077FF]'
+                  : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
+              }`}
+            >
+              <ListVideo className="w-3.5 h-3.5 shrink-0" />
+              <span>Плейлисты</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setOpenedPlaylist(null);
+                setVideoSubView('my_videos');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                videoSubView === 'my_videos'
+                  ? 'bg-[#E5EBF1] text-[#0077FF]'
+                  : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
+              }`}
+            >
+              <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+              <span className="sm:hidden">Мои видео ({myVideos.length})</span>
+              <span className="hidden sm:inline">Мои видео и черновики ({myVideos.length})</span>
+            </button>
+
+            {firebaseUser && (
+              <button
+                type="button"
+                onClick={() => openAuthorProfile(firebaseUser.uid)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                  videoSubView === 'author'
+                    ? 'bg-[#E5EBF1] text-[#0077FF]'
+                    : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
+                }`}
+              >
+                <User className="w-3.5 h-3.5 shrink-0" />
+                <span>Профиль автора</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setVideoSubView('analytics')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                videoSubView === 'analytics'
+                  ? 'bg-[#E5EBF1] text-[#0077FF]'
+                  : 'text-[#818C99] hover:text-[#19191A] hover:bg-[#F0F2F5]'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+              <span>Аналитика</span>
+            </button>
+          </nav>
+
+          {/* Desktop Right Controls: Notifications Bell & Upload CTA */}
+          <div className="hidden lg:flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowNotifPanel(prev => !prev)}
+              className="p-2 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#19191A] relative cursor-pointer transition-colors"
+              title="Уведомления о подписчиках, комментариях и реакциях"
+            >
+              <Bell className="w-4 h-4" />
+              {unreadNotificationsCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#E64646] text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
+                  {unreadNotificationsCount}
+                </span>
+              )}
+            </button>
 
             <button
               type="button"
@@ -336,6 +276,99 @@ export const MenderVideoView: React.FC = () => {
               <span>Опубликовать видео</span>
             </button>
           </div>
+
+          {/* Mobile-safe & Desktop Notifications Popover */}
+          {showNotifPanel && (
+            <>
+              <div
+                onClick={() => setShowNotifPanel(false)}
+                className="fixed inset-0 bg-black/25 z-40 sm:hidden"
+              />
+              <div className="fixed inset-x-3 top-14 sm:absolute sm:inset-auto sm:right-3 sm:top-full sm:mt-2 sm:w-96 bg-white border border-[#E1E3E6] rounded-2xl shadow-2xl z-50 overflow-hidden">
+                <div className="px-4 py-3 border-b border-[#E1E3E6] flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-[#19191A]">
+                    Уведомления ({unreadNotificationsCount} новых)
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {unreadNotificationsCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={markAllNotificationsRead}
+                        className="text-[11px] text-[#0077FF] hover:underline font-medium cursor-pointer"
+                      >
+                        Прочитать все
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowNotifPanel(false)}
+                      className="p-1 rounded hover:bg-[#F0F2F5] text-[#818C99]"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-[65vh] sm:max-h-96 overflow-y-auto divide-y divide-[#E1E3E6]">
+                  {videoNotifications.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-[#818C99]">
+                      Уведомлений пока нет. Здесь появятся новые подписчики, комментарии, ответы и лайки ваших видео.
+                    </div>
+                  ) : (
+                    videoNotifications.map(notif => {
+                      let actionText = '';
+                      if (notif.type === 'new_subscriber') {
+                        actionText = 'подписался(-ась) на ваш профиль автора';
+                      } else if (notif.type === 'video_like') {
+                        actionText = `оценил(-а) ваше видео «${notif.videoTitle}»`;
+                      } else if (notif.type === 'new_comment') {
+                        actionText = `оставил(-а) комментарий к видео «${notif.videoTitle}»: "${notif.commentText}"`;
+                      } else if (notif.type === 'comment_reply') {
+                        actionText = `ответил(-а) на ваш комментарий под «${notif.videoTitle}»: "${notif.commentText}"`;
+                      } else if (notif.type === 'comment_like') {
+                        actionText = `оценил(-а) ваш комментарий: "${notif.commentText}"`;
+                      }
+
+                      return (
+                        <div
+                          key={notif.notificationId}
+                          onClick={() => {
+                            markNotificationRead(notif.notificationId);
+                            setShowNotifPanel(false);
+                            if (notif.videoId) {
+                              openVideoPlayer(notif.videoId);
+                            } else {
+                              openAuthorProfile(notif.actorId);
+                            }
+                          }}
+                          className={`p-3 flex items-start gap-3 cursor-pointer hover:bg-[#F7F8FA] transition-colors ${
+                            !notif.isRead ? 'bg-[#F0F6FF]' : 'bg-white'
+                          }`}
+                        >
+                          <img
+                            src={notif.actorAvatar}
+                            alt={notif.actorName}
+                            className="w-9 h-9 rounded-full object-cover shrink-0 border border-[#E1E3E6]"
+                          />
+                          <div className="flex-1 min-w-0 text-xs">
+                            <p className="text-[#19191A] leading-snug">
+                              <strong className="font-bold text-[#2A5885]">
+                                {notif.actorName}
+                              </strong>{' '}
+                              {actionText}
+                            </p>
+                            <span className="text-[10px] text-[#818C99] mt-0.5 block">
+                              {formatVideoDate(notif.createdAt)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Route SubViews */}
@@ -352,10 +385,10 @@ export const MenderVideoView: React.FC = () => {
         {videoSubView === 'analytics' && <VideoAnalyticsView />}
 
         {videoSubView === 'my_videos' && (
-          <div className="space-y-4">
-            <div className="bg-white border border-[#E1E3E6] rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-3 sm:space-y-4">
+            <div className="bg-white border border-[#E1E3E6] rounded-xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-bold text-[#19191A]">
+                <h2 className="text-sm sm:text-base font-bold text-[#19191A]">
                   Мои видеоролики и черновики
                 </h2>
                 <p className="text-xs text-[#818C99]">
@@ -363,11 +396,11 @@ export const MenderVideoView: React.FC = () => {
                 </p>
               </div>
 
-              <div className="flex items-center gap-1.5 bg-[#F0F2F5] p-1 rounded-lg">
+              <div className="flex items-center gap-1 bg-[#F0F2F5] p-1 rounded-lg overflow-x-auto no-scrollbar w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => setMyVideosFilter('all')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
+                  className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer whitespace-nowrap text-center ${
                     myVideosFilter === 'all'
                       ? 'bg-white text-[#19191A] shadow-2xs'
                       : 'text-[#818C99]'
@@ -378,7 +411,7 @@ export const MenderVideoView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setMyVideosFilter('published')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
+                  className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer whitespace-nowrap text-center ${
                     myVideosFilter === 'published'
                       ? 'bg-white text-[#19191A] shadow-2xs'
                       : 'text-[#818C99]'
@@ -389,7 +422,7 @@ export const MenderVideoView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setMyVideosFilter('draft')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${
+                  className={`flex-1 sm:flex-initial px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer whitespace-nowrap text-center ${
                     myVideosFilter === 'draft'
                       ? 'bg-white text-[#19191A] shadow-2xs'
                       : 'text-[#818C99]'
@@ -732,21 +765,31 @@ export const MenderVideoView: React.FC = () => {
 
         {/* Home View: Search + Categories + Video Grid */}
         {videoSubView === 'home' && (
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {/* Search and Category Filters */}
-            <div className="bg-white border border-[#E1E3E6] rounded-xl p-3.5 space-y-3">
-              <div className="relative">
-                <Search className="w-4 h-4 text-[#818C99] absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <div className="bg-white border border-[#E1E3E6] rounded-xl p-3 sm:p-3.5 space-y-2.5 sm:space-y-3">
+              <div className="relative flex items-center">
+                <Search className="w-4 h-4 text-[#818C99] absolute left-3.5 pointer-events-none" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Поиск видео по названию, описанию, #хештегам или автору..."
-                  className="v7-input pl-10 text-xs"
+                  placeholder="Поиск видео по названию, #хештегам или автору..."
+                  className="v7-input v7-input-search text-xs"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 p-1 rounded-full hover:bg-[#F0F2F5] text-[#818C99] hover:text-[#19191A] cursor-pointer"
+                    title="Очистить поиск"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5 -mx-1 px-1">
                 {['Все', ...VIDEO_CATEGORIES].map(cat => {
                   const active = selectedCategory === cat;
                   return (
