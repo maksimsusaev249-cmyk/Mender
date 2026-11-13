@@ -399,13 +399,27 @@ export async function handleApiRequest(
     // POST /api/auth/register
     // -----------------------------------------------------------------------
     if (pathname === '/api/auth/register') {
+      const cyrillicMap: Record<string, string> = {
+        а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh',
+        з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o',
+        п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts',
+        ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+      };
+      const toLatinSlug = (val: string) =>
+        val
+          .trim()
+          .toLowerCase()
+          .replace(/^@/, '')
+          .split('')
+          .map(ch => cyrillicMap[ch] ?? ch)
+          .join('')
+          .replace(/[^a-z0-9_]/g, '_')
+          .replace(/_+/g, '_')
+          .replace(/^_+|_+$/g, '');
+
       const cleanName = String(body.displayName || '').trim();
       const trimmedEmail = String(body.email || '').trim().toLowerCase();
-      const rawUsernameInput = String(body.username || '')
-        .trim()
-        .toLowerCase()
-        .replace(/^@/, '')
-        .replace(/[^a-z0-9_]/g, '_');
+      const rawUsernameInput = toLatinSlug(String(body.username || ''));
       const password = String(body.password || '');
       const cleanPin = String(body.pin2FA || '').replace(/\D/g, '');
 
@@ -414,11 +428,10 @@ export async function handleApiRequest(
       }
 
       const fallbackPrefix = trimmedEmail
-        ? trimmedEmail.split('@')[0].replace(/[^a-z0-9_]/g, '_')
-        : cleanName.toLowerCase().replace(/[^a-z0-9_]/g, '_') ||
-          `user_${Math.floor(1000 + Math.random() * 9000)}`;
+        ? toLatinSlug(trimmedEmail.split('@')[0] || '')
+        : toLatinSlug(cleanName) || `user_${Math.floor(1000 + Math.random() * 9000)}`;
 
-      const baseUsername = rawUsernameInput || fallbackPrefix;
+      const baseUsername = rawUsernameInput || fallbackPrefix || `user_${Math.floor(1000 + Math.random() * 9000)}`;
       const cleanUsername = (baseUsername.length >= 3 ? baseUsername : `user_${baseUsername}`).slice(0, 40);
 
       if (!password || password.length < 6) {

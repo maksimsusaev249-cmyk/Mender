@@ -580,12 +580,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error(msg);
     }
 
+    const parseAuthApiResponse = async (res: Response, fallbackMsg: string) => {
+      const text = await res.text();
+      let parsed: Record<string, any> | null = null;
+      try {
+        parsed = text ? (JSON.parse(text) as Record<string, any>) : null;
+      } catch {
+        parsed = null;
+      }
+      if (!parsed) {
+        return {
+          error: `Сервер авторизации не отвечает корректно (HTTP ${res.status}). Проверьте, что работают серверные функции (/api/*) и добавлен FIREBASE_SERVICE_ACCOUNT_JSON.`,
+        };
+      }
+      if (
+        typeof parsed.error === 'string' &&
+        parsed.error.includes('SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED')
+      ) {
+        return {
+          ...parsed,
+          error:
+            'На сервере не настроен ключ Firebase Admin (FIREBASE_SERVICE_ACCOUNT_JSON или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY). Добавьте переменную окружения и перезапустите сервер.',
+        };
+      }
+      if (!res.ok && !parsed.error) {
+        return { ...parsed, error: `${fallbackMsg} (HTTP ${res.status})` };
+      }
+      return parsed;
+    };
+
+    const signInCustomTokenSafe = async (customToken: string) => {
+      try {
+        return await signInWithCustomToken(auth, customToken);
+      } catch (err: any) {
+        const code = err?.code || '';
+        const msg =
+          code === 'auth/invalid-custom-token'
+            ? 'Недействительный токен Firebase Custom Auth: проверьте, что Service Account JSON взят из проекта optical-quill-dcf5x.'
+            : err?.message || 'Не удалось завершить вход через Firebase Auth';
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+    };
+
     const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier: trimmed, password: rawPassword }),
     });
-    const data = (await response.json().catch(() => ({}))) as {
+    const data = (await parseAuthApiResponse(response, 'Не удалось выполнить вход')) as {
       error?: string;
       code?: string;
       customToken?: string;
@@ -632,7 +675,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
     }
 
-    const cred = await signInWithCustomToken(auth, data.customToken);
+    const cred = await signInCustomTokenSafe(data.customToken);
     setFirebaseUser(cred.user);
     sendSystemLoginSecurityNotification(data.uid).catch(() => {});
   };
@@ -653,22 +696,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
-    const data = (await response.json().catch(() => ({}))) as {
+    const rawText = await response.text();
+    let parsed: Record<string, any> | null = null;
+    try {
+      parsed = rawText ? (JSON.parse(rawText) as Record<string, any>) : null;
+    } catch {
+      parsed = null;
+    }
+
+    const data = (parsed || {}) as {
       error?: string;
       customToken?: string;
       uid?: string;
     };
 
+    if (!parsed) {
+      const msg = `Сервер регистрации (/api/auth/register) вернул неверный ответ (HTTP ${response.status}). Убедитесь, что работают серверные функции (/api/*) и настроен FIREBASE_SERVICE_ACCOUNT_JSON.`;
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
     if (!response.ok || !data.customToken || !data.uid) {
-      const msg = data.error || 'Ошибка регистрации аккаунта';
+      const rawError = data.error || `Ошибка регистрации аккаунта (HTTP ${response.status})`;
+      const msg = rawError.includes('SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED')
+        ? 'На сервере не настроен ключ Firebase Admin (FIREBASE_SERVICE_ACCOUNT_JSON или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY). Добавьте переменную окружения и перезапустите сервер.'
+        : rawError;
       setAuthError(msg);
       throw new Error(msg);
     }
 
     setIsPinVerified(true);
     sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
-    const cred = await signInWithCustomToken(auth, data.customToken);
-    setFirebaseUser(cred.user);
+    try {
+      const cred = await signInWithCustomToken(auth, data.customToken);
+      setFirebaseUser(cred.user);
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg =
+        code === 'auth/invalid-custom-token'
+          ? 'Недействительный токен Firebase Custom Auth: проверьте, что Service Account JSON взят из проекта optical-quill-dcf5x.'
+          : err?.message || 'Ошибка входа после регистрации аккаунта';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
   };
 
   /**
@@ -691,14 +761,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           pin: providedPin,
         }),
       });
-      const data = (await response.json().catch(() => ({}))) as {
+      const rawText = await response.text();
+      let parsed: Record<string, any> | null = null;
+      try {
+        parsed = rawText ? (JSON.parse(rawText) as Record<string, any>) : null;
+      } catch {
+        parsed = null;
+      }
+
+      if (!parsed) {
+        const msg = `Сервер авторизации (/api/auth/quick-email) не отвечает JSON (HTTP ${response.status}). Проверьте серверные функции и FIREBASE_SERVICE_ACCOUNT_JSON.`;
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+
+      const data = parsed as {
         error?: string;
         customToken?: string;
         uid?: string;
       };
 
       if (!response.ok || !data.customToken || !data.uid) {
-        const msg = data.error || 'Не удалось выполнить вход по почте';
+        const rawError = data.error || `Не удалось выполнить вход по почте (HTTP ${response.status})`;
+        const msg = rawError.includes('SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED')
+          ? 'На сервере не настроен ключ Firebase Admin (FIREBASE_SERVICE_ACCOUNT_JSON или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY).'
+          : rawError;
         setAuthError(msg);
         throw new Error(msg);
       }

@@ -38,7 +38,9 @@ function bytesToBase64Url(bytes: Uint8Array): string {
 }
 
 function base64UrlToBytes(input: string): Uint8Array<ArrayBuffer> {
-  const padded = input.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((input.length + 3) % 4);
+  const cleaned = input.replace(/\s+/g, '');
+  const base64 = cleaned.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '==='.slice((base64.length + 3) % 4);
   const binary = atob(padded);
   const buffer = new ArrayBuffer(binary.length);
   const bytes = new Uint8Array(buffer);
@@ -46,6 +48,17 @@ function base64UrlToBytes(input: string): Uint8Array<ArrayBuffer> {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+}
+
+function stripOuterQuotes(value?: string): string {
+  const trimmed = (value || '').trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
 }
 
 function strToBase64Url(str: string): string {
@@ -155,27 +168,39 @@ export async function verifyPinHashServer(
 }
 
 export function resolveServiceAccount(env: ServerEnv): ServiceAccountCredentials {
-  if (env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    const raw = env.FIREBASE_SERVICE_ACCOUNT_JSON.trim();
-    const jsonStr = raw.startsWith('{')
-      ? raw
-      : textDecoder.decode(base64UrlToBytes(raw));
-    const parsed = JSON.parse(jsonStr) as Partial<ServiceAccountCredentials>;
+  const rawJsonEnv = stripOuterQuotes(env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  if (rawJsonEnv) {
+    const jsonStr = rawJsonEnv.startsWith('{')
+      ? rawJsonEnv
+      : textDecoder.decode(base64UrlToBytes(rawJsonEnv));
+    let parsed: Partial<ServiceAccountCredentials>;
+    try {
+      parsed = JSON.parse(jsonStr) as Partial<ServiceAccountCredentials>;
+    } catch {
+      throw new Error(
+        'INVALID_FIREBASE_SERVICE_ACCOUNT_JSON: проверьте формат FIREBASE_SERVICE_ACCOUNT_JSON (должен быть валидный JSON или Base64 из Firebase Console).'
+      );
+    }
     if (!parsed.client_email || !parsed.private_key) {
       throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON missing client_email or private_key');
     }
     return {
-      project_id: parsed.project_id || env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-      client_email: parsed.client_email,
+      project_id:
+        stripOuterQuotes(parsed.project_id) ||
+        stripOuterQuotes(env.FIREBASE_PROJECT_ID) ||
+        firebaseConfig.projectId,
+      client_email: parsed.client_email.trim(),
       private_key: parsed.private_key.replace(/\\n/g, '\n'),
     };
   }
 
-  if (env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY) {
+  const clientEmail = stripOuterQuotes(env.FIREBASE_CLIENT_EMAIL);
+  const privateKey = stripOuterQuotes(env.FIREBASE_PRIVATE_KEY);
+  if (clientEmail && privateKey) {
     return {
-      project_id: env.FIREBASE_PROJECT_ID || firebaseConfig.projectId,
-      client_email: env.FIREBASE_CLIENT_EMAIL.trim(),
-      private_key: env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      project_id: stripOuterQuotes(env.FIREBASE_PROJECT_ID) || firebaseConfig.projectId,
+      client_email: clientEmail,
+      private_key: privateKey.replace(/\\n/g, '\n'),
     };
   }
 
@@ -186,8 +211,12 @@ export function resolveServiceAccount(env: ServerEnv): ServiceAccountCredentials
 
 export function getFirebaseProjectTargets(env: ServerEnv, sa?: ServiceAccountCredentials) {
   return {
-    projectId: env.FIREBASE_PROJECT_ID || sa?.project_id || firebaseConfig.projectId,
-    databaseId: env.FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId || '(default)',
+    projectId:
+      stripOuterQuotes(env.FIREBASE_PROJECT_ID) || sa?.project_id || firebaseConfig.projectId,
+    databaseId:
+      stripOuterQuotes(env.FIREBASE_DATABASE_ID) ||
+      firebaseConfig.firestoreDatabaseId ||
+      '(default)',
   };
 }
 

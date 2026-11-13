@@ -8,7 +8,7 @@ import type {ServerEnv} from './server/firebaseAdminRest';
 
 export default defineConfig(({mode}) => {
   const loadedEnv = loadEnv(mode, process.cwd(), '');
-  const serverEnv: ServerEnv = {
+  const getServerEnv = (): ServerEnv => ({
     FIREBASE_SERVICE_ACCOUNT_JSON:
       process.env.FIREBASE_SERVICE_ACCOUNT_JSON || loadedEnv.FIREBASE_SERVICE_ACCOUNT_JSON,
     FIREBASE_CLIENT_EMAIL: process.env.FIREBASE_CLIENT_EMAIL || loadedEnv.FIREBASE_CLIENT_EMAIL,
@@ -22,6 +22,45 @@ export default defineConfig(({mode}) => {
     TURN_USERNAME: process.env.TURN_USERNAME || loadedEnv.TURN_USERNAME,
     TURN_CREDENTIAL: process.env.TURN_CREDENTIAL || loadedEnv.TURN_CREDENTIAL,
     TURN_SECRET: process.env.TURN_SECRET || loadedEnv.TURN_SECRET,
+  });
+
+  const apiMiddleware = async (req: any, res: any, next: () => void) => {
+    if (!req.url || !req.url.startsWith('/api/')) {
+      return next();
+    }
+    try {
+      const host = req.headers.host || 'localhost:3000';
+      const fullUrl = new URL(req.url, `http://${host}`);
+      const chunks: Buffer[] = [];
+      if (req.method && !['GET', 'HEAD'].includes(req.method.toUpperCase())) {
+        await new Promise<void>((resolve, reject) => {
+          req.on('data', (c: Buffer | Uint8Array | string) => chunks.push(Buffer.from(c)));
+          req.on('end', resolve);
+          req.on('error', reject);
+        });
+      }
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (typeof v === 'string') headers.set(k, v);
+        else if (Array.isArray(v)) headers.set(k, v.join(', '));
+      }
+      const webReq = new Request(fullUrl.toString(), {
+        method: req.method || 'GET',
+        headers,
+        body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
+      });
+      const webRes = await handleApiRequest(webReq, getServerEnv());
+      res.statusCode = webRes.status;
+      webRes.headers.forEach((value, key) => {
+        res.setHeader(key, value);
+      });
+      const buf = Buffer.from(await webRes.arrayBuffer());
+      res.end(buf);
+    } catch (err: any) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({error: err?.message || 'API error'}));
+    }
   };
 
   return {
@@ -31,44 +70,10 @@ export default defineConfig(({mode}) => {
       {
         name: 'mender-api-dev-middleware',
         configureServer(server) {
-          server.middlewares.use(async (req, res, next) => {
-            if (!req.url || !req.url.startsWith('/api/')) {
-              return next();
-            }
-            try {
-              const host = req.headers.host || 'localhost:3000';
-              const fullUrl = new URL(req.url, `http://${host}`);
-              const chunks: Buffer[] = [];
-              if (req.method && !['GET', 'HEAD'].includes(req.method.toUpperCase())) {
-                await new Promise<void>((resolve, reject) => {
-                  req.on('data', c => chunks.push(Buffer.from(c)));
-                  req.on('end', resolve);
-                  req.on('error', reject);
-                });
-              }
-              const headers = new Headers();
-              for (const [k, v] of Object.entries(req.headers)) {
-                if (typeof v === 'string') headers.set(k, v);
-                else if (Array.isArray(v)) headers.set(k, v.join(', '));
-              }
-              const webReq = new Request(fullUrl.toString(), {
-                method: req.method || 'GET',
-                headers,
-                body: chunks.length > 0 ? Buffer.concat(chunks) : undefined,
-              });
-              const webRes = await handleApiRequest(webReq, serverEnv);
-              res.statusCode = webRes.status;
-              webRes.headers.forEach((value, key) => {
-                res.setHeader(key, value);
-              });
-              const buf = Buffer.from(await webRes.arrayBuffer());
-              res.end(buf);
-            } catch (err: any) {
-              res.statusCode = 500;
-              res.setHeader('Content-Type', 'application/json; charset=utf-8');
-              res.end(JSON.stringify({error: err?.message || 'API error'}));
-            }
-          });
+          server.middlewares.use(apiMiddleware);
+        },
+        configurePreviewServer(server) {
+          server.middlewares.use(apiMiddleware);
         },
       },
       {
