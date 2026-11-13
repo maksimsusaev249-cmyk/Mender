@@ -1,4 +1,7 @@
-import firebaseConfig from '../firebase-applet-config.json';
+const DEFAULT_FIREBASE_CONFIG = {
+  projectId: 'optical-quill-dcf5x',
+  firestoreDatabaseId: 'ai-studio-mendermessenger-3a629084-b705-4446-a866-39cb727e7017',
+};
 
 export interface ServerEnv {
   FIREBASE_SERVICE_ACCOUNT_JSON?: string;
@@ -188,7 +191,7 @@ export function resolveServiceAccount(env: ServerEnv): ServiceAccountCredentials
       project_id:
         stripOuterQuotes(parsed.project_id) ||
         stripOuterQuotes(env.FIREBASE_PROJECT_ID) ||
-        firebaseConfig.projectId,
+        DEFAULT_FIREBASE_CONFIG.projectId,
       client_email: parsed.client_email.trim(),
       private_key: parsed.private_key.replace(/\\n/g, '\n'),
     };
@@ -198,24 +201,24 @@ export function resolveServiceAccount(env: ServerEnv): ServiceAccountCredentials
   const privateKey = stripOuterQuotes(env.FIREBASE_PRIVATE_KEY);
   if (clientEmail && privateKey) {
     return {
-      project_id: stripOuterQuotes(env.FIREBASE_PROJECT_ID) || firebaseConfig.projectId,
+      project_id: stripOuterQuotes(env.FIREBASE_PROJECT_ID) || DEFAULT_FIREBASE_CONFIG.projectId,
       client_email: clientEmail,
       private_key: privateKey.replace(/\\n/g, '\n'),
     };
   }
 
   throw new Error(
-    'SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED: установите FIREBASE_SERVICE_ACCOUNT_JSON (или FIREBASE_CLIENT_EMAIL и FIREBASE_PRIVATE_KEY) в переменных окружения сервера / Cloudflare Pages.'
+    'SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED: установите FIREBASE_SERVICE_ACCOUNT_JSON (или FIREBASE_CLIENT_EMAIL и FIREBASE_PRIVATE_KEY) в переменных окружения сервера (Vercel / Cloudflare Pages).'
   );
 }
 
 export function getFirebaseProjectTargets(env: ServerEnv, sa?: ServiceAccountCredentials) {
   return {
     projectId:
-      stripOuterQuotes(env.FIREBASE_PROJECT_ID) || sa?.project_id || firebaseConfig.projectId,
+      stripOuterQuotes(env.FIREBASE_PROJECT_ID) || sa?.project_id || DEFAULT_FIREBASE_CONFIG.projectId,
     databaseId:
       stripOuterQuotes(env.FIREBASE_DATABASE_ID) ||
-      firebaseConfig.firestoreDatabaseId ||
+      DEFAULT_FIREBASE_CONFIG.firestoreDatabaseId ||
       '(default)',
   };
 }

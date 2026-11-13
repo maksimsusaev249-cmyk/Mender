@@ -1,14 +1,24 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { Buffer } from 'node:buffer';
-import { handleApiRequest } from '../server/apiRouter';
-import type { ServerEnv } from '../server/firebaseAdminRest';
+import { handleApiRequest } from '../server/apiRouter.js';
+import type { ServerEnv } from '../server/firebaseAdminRest.js';
 
-type VercelRequest = IncomingMessage & {
+interface VercelNodeRequest {
+  method?: string;
+  url?: string;
+  headers: Record<string, string | string[] | undefined>;
   body?: unknown;
-  query?: Record<string, string | string[]>;
-};
+  on: (event: string, listener: (...args: any[]) => void) => void;
+}
 
-export default async function handler(req: VercelRequest, res: ServerResponse): Promise<void> {
+interface VercelNodeResponse {
+  statusCode: number;
+  setHeader: (name: string, value: string) => void;
+  end: (chunk?: any) => void;
+}
+
+export default async function handler(
+  req: VercelNodeRequest,
+  res: VercelNodeResponse
+): Promise<void> {
   try {
     const protoHeader = req.headers['x-forwarded-proto'];
     const proto = typeof protoHeader === 'string' ? protoHeader.split(',')[0].trim() : 'https';
@@ -16,6 +26,13 @@ export default async function handler(req: VercelRequest, res: ServerResponse): 
     const host = typeof hostHeader === 'string' ? hostHeader.split(',')[0].trim() : 'localhost';
     const rawUrl = req.url || '/api/health';
     const fullUrl = new URL(rawUrl, `${proto}://${host}`);
+
+    const pathParam = fullUrl.searchParams.get('__path');
+    if (pathParam !== null) {
+      fullUrl.searchParams.delete('__path');
+      const normalized = pathParam.replace(/^\/+/, '');
+      fullUrl.pathname = normalized ? `/api/${normalized}` : '/api';
+    }
 
     const headers = new Headers();
     for (const [key, value] of Object.entries(req.headers)) {
@@ -32,32 +49,46 @@ export default async function handler(req: VercelRequest, res: ServerResponse): 
       if (req.body !== undefined) {
         if (typeof req.body === 'string') {
           body = req.body;
-        } else if (Buffer.isBuffer(req.body)) {
+        } else if (req.body instanceof Uint8Array) {
           body = new Uint8Array(req.body);
         } else {
           body = JSON.stringify(req.body);
         }
       } else {
-        const chunks: Buffer[] = [];
+        const chunks: Uint8Array[] = [];
         await new Promise<void>((resolve, reject) => {
-          req.on('data', (chunk: Buffer | Uint8Array | string) => chunks.push(Buffer.from(chunk)));
+          req.on('data', (chunk: Uint8Array | string) => {
+            chunks.push(typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk);
+          });
           req.on('end', resolve);
           req.on('error', reject);
         });
         if (chunks.length > 0) {
-          body = new Uint8Array(Buffer.concat(chunks));
+          const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
+          const merged = new Uint8Array(totalLen);
+          let offset = 0;
+          for (const chunk of chunks) {
+            merged.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          body = merged;
         }
       }
     }
 
+    const envSource =
+      typeof globalThis !== 'undefined' && (globalThis as any).process?.env
+        ? ((globalThis as any).process.env as ServerEnv)
+        : {};
+
     const webReq = new Request(fullUrl.toString(), { method, headers, body });
-    const webRes = await handleApiRequest(webReq, process.env as unknown as ServerEnv);
+    const webRes = await handleApiRequest(webReq, envSource);
 
     res.statusCode = webRes.status;
     webRes.headers.forEach((value, key) => {
       res.setHeader(key, value);
     });
-    const buf = Buffer.from(await webRes.arrayBuffer());
+    const buf = new Uint8Array(await webRes.arrayBuffer());
     res.end(buf);
   } catch (err: any) {
     res.statusCode = 500;

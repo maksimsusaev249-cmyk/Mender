@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { handleApiRequest } from '../server/apiRouter';
+import { handleApiRequest } from '../server/apiRouter.js';
 import {
   FirestoreRestClient,
   ServiceAccountCredentials,
   createFirebaseCustomToken,
-} from '../server/firebaseAdminRest';
+} from '../server/firebaseAdminRest.js';
 import { dirtyDozenTestCases } from '../firestore.rules.test';
 
 const root = path.resolve(process.cwd());

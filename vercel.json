@@ -5,6 +5,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "/api/index?__path=$1"
+    },
+    {
       "source": "/((?!api/|assets/|sw\\.js|manifest\\.json|favicon\\.ico|icon\\.svg|pwa-.*\\.png|apple-touch-icon\\.png|Mender-Lite-Android\\.apk|apk-build-info\\.json).*)",
       "destination": "/index.html"
     }

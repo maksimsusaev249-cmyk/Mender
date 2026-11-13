@@ -18,7 +18,7 @@ import {
   verifyRecoveryChallengeToken,
   sha256Hex,
   constantTimeEqual,
-} from './firebaseAdminRest';
+} from './firebaseAdminRest.js';
 
 export interface ApiRouterDeps {
   createFirestore?: (env: ServerEnv) => Promise<{

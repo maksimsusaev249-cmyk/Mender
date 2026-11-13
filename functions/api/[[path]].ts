@@ -1,5 +1,5 @@
-import { handleApiRequest } from '../../server/apiRouter';
-import type { ServerEnv } from '../../server/firebaseAdminRest';
+import { handleApiRequest } from '../../server/apiRouter.js';
+import type { ServerEnv } from '../../server/firebaseAdminRest.js';
 
 interface PagesFunctionContext {
   request: Request;

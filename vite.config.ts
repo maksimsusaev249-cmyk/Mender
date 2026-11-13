@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
-import {handleApiRequest} from './server/apiRouter';
-import type {ServerEnv} from './server/firebaseAdminRest';
+import {handleApiRequest} from './server/apiRouter.js';
+import type {ServerEnv} from './server/firebaseAdminRest.js';
 
 export default defineConfig(({mode}) => {
   const loadedEnv = loadEnv(mode, process.cwd(), '');
