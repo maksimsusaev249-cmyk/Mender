@@ -25,17 +25,35 @@ service cloud.firestore {
       return resource.data;
     }
 
-    // Supports both OAuth/Phone Firebase Auth tokens and Quick Email Auth sessions (usr_*)
     function isSignedIn() {
-      return request.auth != null || request.time != null;
+      return request.auth != null && isValidId(request.auth.uid);
     }
 
     function isVerified() {
-      return (request.auth != null && request.auth.token.email_verified == true) || request.time != null;
+      return isSignedIn() && (
+        request.auth.token.email_verified == true
+        || (
+          'firebase' in request.auth.token
+          && 'sign_in_provider' in request.auth.token.firebase
+          && request.auth.token.firebase.sign_in_provider in ['phone', 'custom']
+        )
+      );
     }
 
     function isOwner(userId) {
-      return isValidId(userId) && (request.auth == null || request.auth.uid == userId || userId.matches('^usr_.*'));
+      return isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    function isChatMember(chatId) {
+      return exists(/databases/$(database)/documents/chats/$(chatId)/members/$(request.auth.uid));
+    }
+
+    function isChatAdmin(chatId) {
+      return get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+        || (
+          isChatMember(chatId)
+          && get(/databases/$(database)/documents/chats/$(chatId)/members/$(request.auth.uid)).data.role in ['owner', 'admin']
+        );
     }
 
     // =========================================================================
@@ -613,6 +631,19 @@ service cloud.firestore {
       && data.updatedAt is timestamp;
     }
 
+    function isValidProfileFolder(data) {
+      return data.keys().hasAll(['folderId', 'userId', 'name', 'postIds'])
+      && data.keys().hasOnly(['folderId', 'userId', 'name', 'icon', 'postIds', 'createdAt', 'updatedAt'])
+      && isValidId(data.folderId)
+      && isValidId(data.userId)
+      && isOwner(data.userId)
+      && data.name is string && data.name.size() >= 1 && data.name.size() <= 60
+      && (!('icon' in data) || (data.icon is string && data.icon.size() <= 40))
+      && data.postIds is list && data.postIds.size() <= 500
+      && (!('createdAt' in data) || data.createdAt is timestamp)
+      && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
     // =========================================================================
     // 3. COLLECTION RULES
     // =========================================================================
@@ -649,7 +680,14 @@ service cloud.firestore {
             incoming().diff(existing()).affectedKeys().hasOnly(['followingCount', 'updatedAt'])
           ))
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
+          (
+            userId != request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
+            && (
+              incoming().followersCount == existing().followersCount + 1
+              || incoming().followersCount == existing().followersCount - 1
+            )
+          )
         );
 
       allow delete: if false;
@@ -690,9 +728,26 @@ service cloud.firestore {
           && incoming().joinedAt == request.time
           && incoming().updatedAt == request.time
           && (
-            isOwner(userId)
-            || exists(/databases/$(database)/documents/chats/$(chatId))
-            || existsAfter(/databases/$(database)/documents/chats/$(chatId))
+            (isOwner(userId) && (
+              (existsAfter(/databases/$(database)/documents/chats/$(chatId))
+                && getAfter(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+                && incoming().role == 'owner')
+              ||
+              (exists(/databases/$(database)/documents/chats/$(chatId))
+                && get(/databases/$(database)/documents/chats/$(chatId)).data.visibility == 'public'
+                && incoming().role == 'member')
+              ||
+              (exists(/databases/$(database)/documents/chats/$(chatId)/members/$(userId))
+                && incoming().role == get(/databases/$(database)/documents/chats/$(chatId)/members/$(userId)).data.role)
+            ))
+            ||
+            (existsAfter(/databases/$(database)/documents/chats/$(chatId))
+              && getAfter(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+              && incoming().role in ['admin', 'moderator', 'member'])
+            ||
+            (exists(/databases/$(database)/documents/chats/$(chatId))
+              && get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+              && incoming().role in ['admin', 'moderator', 'member'])
           );
 
         allow update: if isVerified()
@@ -706,7 +761,12 @@ service cloud.firestore {
           && (
             (isOwner(userId) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['isPinned', 'isMuted', 'updatedAt']))
             ||
-            (incoming().role in ['admin', 'moderator', 'member'] && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt']))
+            (
+              exists(/databases/$(database)/documents/chats/$(chatId))
+              && isChatAdmin(chatId)
+              && incoming().role in ['admin', 'moderator', 'member']
+              && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt'])
+            )
           );
 
         allow delete: if isVerified()
@@ -774,17 +834,23 @@ service cloud.firestore {
       }
 
       match /profile_folders/{folderId} {
-        allow get, list: if isSignedIn() && isValidId(userId);
-        allow create, update: if isVerified()
+        allow get: if isSignedIn() && isValidId(userId) && isValidId(folderId);
+        allow list: if isSignedIn() && existing().userId == userId;
+        allow create: if isVerified()
           && isValidId(userId)
           && isValidId(folderId)
           && isOwner(userId)
+          && isValidProfileFolder(incoming())
           && incoming().folderId == folderId
-          && incoming().userId == userId
-          && incoming().name is string
-          && incoming().name.size() >= 1
-          && incoming().name.size() <= 60
-          && incoming().postIds is list;
+          && incoming().userId == userId;
+        allow update: if isVerified()
+          && isValidId(userId)
+          && isValidId(folderId)
+          && isOwner(userId)
+          && isValidProfileFolder(incoming())
+          && incoming().folderId == existing().folderId
+          && incoming().userId == existing().userId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'icon', 'postIds', 'updatedAt']);
         allow delete: if isVerified()
           && isValidId(userId)
           && isValidId(folderId)
@@ -924,6 +990,7 @@ service cloud.firestore {
           || existing().visibility == 'public'
           || isOwner(existing().ownerId)
           || isOwner(existing().peerUserId)
+          || isChatMember(chatId)
         );
 
       allow list: if isSignedIn()
@@ -952,13 +1019,36 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          incoming().diff(existing()).affectedKeys().hasOnly([
+          (isChatAdmin(chatId) && incoming().diff(existing()).affectedKeys().hasOnly([
             'name', 'description', 'avatarUrl', 'visibility', 'membersCount', 'updatedAt'
-          ])
+          ]))
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly([
-            'lastMessageText', 'lastMessageType', 'lastMessageSenderId', 'membersCount', 'updatedAt'
-          ])
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'lastMessageText', 'lastMessageType', 'lastMessageSenderId', 'membersCount', 'updatedAt'
+            ])
+            && (
+              (
+                (
+                  isOwner(existing().ownerId)
+                  || (existing().type != 'channel' && (isOwner(existing().peerUserId) || isChatMember(chatId)))
+                  || isChatAdmin(chatId)
+                )
+                && (isOwner(incoming().lastMessageSenderId) || isChatAdmin(chatId))
+              )
+              ||
+              (
+                existing().visibility == 'public'
+                && (
+                  incoming().membersCount == existing().membersCount + 1
+                  || incoming().membersCount == existing().membersCount - 1
+                )
+                && incoming().lastMessageText == existing().lastMessageText
+                && incoming().lastMessageType == existing().lastMessageType
+                && isOwner(incoming().lastMessageSenderId)
+              )
+            )
+          )
         );
 
       allow delete: if isVerified()
@@ -966,7 +1056,17 @@ service cloud.firestore {
         && isOwner(existing().ownerId);
 
       match /members/{memberId} {
-        allow get: if isSignedIn() && isValidId(chatId) && isValidId(memberId);
+        allow get: if isSignedIn()
+          && isValidId(chatId)
+          && isValidId(memberId)
+          && (
+            isOwner(memberId)
+            || get(/databases/$(database)/documents/chats/$(chatId)).data.visibility == 'public'
+            || get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+            || get(/databases/$(database)/documents/chats/$(chatId)).data.peerUserId == request.auth.uid
+            || isChatMember(chatId)
+          );
+
         allow list: if isSignedIn()
           && existing().chatId == chatId
           && existing().role in ['owner', 'admin', 'moderator', 'member'];
@@ -977,19 +1077,51 @@ service cloud.firestore {
           && isValidChatMember(incoming())
           && incoming().chatId == chatId
           && incoming().userId == memberId
-          && incoming().joinedAt == request.time;
+          && incoming().joinedAt == request.time
+          && (
+            (
+              existsAfter(/databases/$(database)/documents/chats/$(chatId))
+              && getAfter(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+              && (
+                (isOwner(memberId) && incoming().role == 'owner')
+                || incoming().role in ['admin', 'moderator', 'member']
+              )
+            )
+            ||
+            (
+              exists(/databases/$(database)/documents/chats/$(chatId))
+              && isChatAdmin(chatId)
+              && incoming().role in ['admin', 'moderator', 'member']
+            )
+            ||
+            (
+              exists(/databases/$(database)/documents/chats/$(chatId))
+              && get(/databases/$(database)/documents/chats/$(chatId)).data.visibility == 'public'
+              && isOwner(memberId)
+              && incoming().role == 'member'
+            )
+          );
 
         allow update: if isVerified()
           && isValidId(chatId)
           && isValidId(memberId)
           && isValidChatMember(incoming())
+          && exists(/databases/$(database)/documents/chats/$(chatId))
+          && isChatAdmin(chatId)
+          && existing().role != 'owner'
           && incoming().chatId == existing().chatId
           && incoming().userId == existing().userId
           && incoming().joinedAt == existing().joinedAt
           && incoming().role in ['admin', 'moderator', 'member']
           && incoming().diff(existing()).affectedKeys().hasOnly(['role']);
 
-        allow delete: if isVerified() && isValidId(chatId) && isValidId(memberId);
+        allow delete: if isVerified()
+          && isValidId(chatId)
+          && isValidId(memberId)
+          && (
+            isOwner(memberId)
+            || (exists(/databases/$(database)/documents/chats/$(chatId)) && isChatAdmin(chatId) && existing().role != 'owner')
+          );
       }
 
       match /messages/{messageId} {
@@ -1000,6 +1132,7 @@ service cloud.firestore {
             existing().chatVisibility == 'public'
             || isOwner(existing().senderId)
             || isOwner(existing().recipientId)
+            || isChatMember(chatId)
           );
 
         allow list: if isSignedIn()
@@ -1016,7 +1149,35 @@ service cloud.firestore {
           && isValidMessage(incoming())
           && incoming().messageId == messageId
           && incoming().chatId == chatId
-          && (isOwner(incoming().senderId) || (incoming().senderId == 'mender_security_bot' && isOwner(incoming().recipientId)))
+          && exists(/databases/$(database)/documents/chats/$(chatId))
+          && incoming().chatVisibility == get(/databases/$(database)/documents/chats/$(chatId)).data.visibility
+          && (
+            (
+              isOwner(incoming().senderId)
+              && (
+                (
+                  get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'channel'
+                  && isChatAdmin(chatId)
+                )
+                ||
+                (
+                  get(/databases/$(database)/documents/chats/$(chatId)).data.type != 'channel'
+                  && (
+                    get(/databases/$(database)/documents/chats/$(chatId)).data.visibility == 'public'
+                    || get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+                    || get(/databases/$(database)/documents/chats/$(chatId)).data.peerUserId == request.auth.uid
+                    || isChatMember(chatId)
+                  )
+                )
+              )
+            )
+            ||
+            (
+              incoming().senderId == 'mender_security_bot'
+              && isOwner(incoming().recipientId)
+              && get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+            )
+          )
           && incoming().likesCount == 0
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time;
@@ -1033,17 +1194,41 @@ service cloud.firestore {
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
           && (
-            incoming().diff(existing()).affectedKeys().hasOnly(['content', 'updatedAt'])
+            (
+              isOwner(existing().senderId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'updatedAt'])
+            )
             ||
-            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'likesCount', 'reactionEmoji', 'updatedAt'])
-            ||
-            incoming().diff(existing()).affectedKeys().hasOnly(['deletedForUserIds', 'updatedAt'])
+            (
+              (
+                existing().chatVisibility == 'public'
+                || isOwner(existing().senderId)
+                || isOwner(existing().recipientId)
+                || isChatMember(chatId)
+              )
+              && (
+                (
+                  incoming().diff(existing()).affectedKeys().hasOnly(['status', 'likesCount', 'reactionEmoji', 'updatedAt'])
+                  && (
+                    incoming().likesCount == existing().likesCount
+                    || incoming().likesCount == existing().likesCount + 1
+                    || incoming().likesCount == existing().likesCount - 1
+                  )
+                )
+                ||
+                incoming().diff(existing()).affectedKeys().hasOnly(['deletedForUserIds', 'updatedAt'])
+              )
+            )
           );
 
         allow delete: if isVerified()
           && isValidId(chatId)
           && isValidId(messageId)
-          && (isOwner(existing().senderId) || isOwner(existing().recipientId));
+          && (
+            isOwner(existing().senderId)
+            || isOwner(existing().recipientId)
+            || (exists(/databases/$(database)/documents/chats/$(chatId)) && get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid)
+          );
       }
     }
 
@@ -1073,11 +1258,19 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (
-          incoming().diff(existing()).affectedKeys().hasOnly(['content', 'visibility', 'updatedAt'])
+          (isOwner(existing().authorId) && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'visibility', 'updatedAt']))
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt'])
+          (
+            (existing().visibility == 'public' || isOwner(existing().authorId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt'])
+            && (incoming().likesCount == existing().likesCount + 1 || incoming().likesCount == existing().likesCount - 1)
+          )
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'updatedAt'])
+          (
+            (existing().visibility == 'public' || isOwner(existing().authorId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'updatedAt'])
+            && (incoming().commentsCount == existing().commentsCount + 1 || incoming().commentsCount == existing().commentsCount - 1)
+          )
         );
 
       allow delete: if isVerified()
@@ -1085,7 +1278,7 @@ service cloud.firestore {
         && isOwner(existing().authorId);
 
       match /likes/{likeUserId} {
-        allow get: if isSignedIn() && isValidId(postId) && isValidId(likeUserId);
+        allow get: if isSignedIn() && isValidId(postId) && isValidId(likeUserId) && isOwner(likeUserId);
         allow list: if isSignedIn() && existing().postId == postId && isOwner(existing().userId);
 
         allow create: if isVerified()
@@ -1163,6 +1356,7 @@ service cloud.firestore {
       allow update: if isVerified()
         && isValidId(callId)
         && isValidCallSession(incoming())
+        && (isOwner(existing().callerId) || isOwner(existing().calleeId))
         && existing().status != 'ended'
         && incoming().callId == existing().callId
         && incoming().chatId == existing().chatId
@@ -1194,6 +1388,11 @@ service cloud.firestore {
           && isValidId(callId)
           && isValidId(candidateId)
           && isValidIceCandidate(incoming())
+          && exists(/databases/$(database)/documents/calls/$(callId))
+          && (
+            get(/databases/$(database)/documents/calls/$(callId)).data.callerId == request.auth.uid
+            || get(/databases/$(database)/documents/calls/$(callId)).data.calleeId == request.auth.uid
+          )
           && incoming().candidateId == candidateId
           && incoming().callId == callId
           && isOwner(incoming().senderId)
@@ -1255,11 +1454,23 @@ service cloud.firestore {
             'status', 'visibility', 'updatedAt'
           ]))
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount', 'updatedAt'])
+          (
+            (existing().visibility == 'public' || isOwner(existing().authorId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount', 'updatedAt'])
+            && incoming().viewsCount == existing().viewsCount + 1
+          )
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt'])
+          (
+            (existing().visibility == 'public' || isOwner(existing().authorId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt'])
+            && (incoming().likesCount == existing().likesCount + 1 || incoming().likesCount == existing().likesCount - 1)
+          )
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'updatedAt'])
+          (
+            (existing().visibility == 'public' || isOwner(existing().authorId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'updatedAt'])
+            && (incoming().commentsCount == existing().commentsCount + 1 || incoming().commentsCount == existing().commentsCount - 1)
+          )
         );
 
       allow delete: if isVerified()
@@ -1267,7 +1478,7 @@ service cloud.firestore {
         && isOwner(existing().authorId);
 
       match /views/{viewerId} {
-        allow get: if isSignedIn() && isValidId(videoId) && isValidId(viewerId);
+        allow get: if isSignedIn() && isValidId(videoId) && isValidId(viewerId) && isOwner(viewerId);
         allow list: if isSignedIn() && existing().videoId == videoId && isOwner(existing().viewerId);
 
         allow create: if isVerified()
@@ -1283,7 +1494,7 @@ service cloud.firestore {
       }
 
       match /likes/{likeUserId} {
-        allow get: if isSignedIn() && isValidId(videoId) && isValidId(likeUserId);
+        allow get: if isSignedIn() && isValidId(videoId) && isValidId(likeUserId) && isOwner(likeUserId);
         allow list: if isSignedIn() && existing().videoId == videoId && isOwner(existing().userId);
 
         allow create: if isVerified()
@@ -1307,7 +1518,11 @@ service cloud.firestore {
         allow get: if isSignedIn()
           && isValidId(videoId)
           && isValidId(commentId)
-          && existing().videoId == videoId;
+          && existing().videoId == videoId
+          && (
+            get(/databases/$(database)/documents/mender_videos/$(videoId)).data.visibility == 'public'
+            || get(/databases/$(database)/documents/mender_videos/$(videoId)).data.authorId == request.auth.uid
+          );
 
         allow list: if isSignedIn()
           && existing().videoId == videoId;
@@ -1316,6 +1531,7 @@ service cloud.firestore {
           && isValidId(videoId)
           && isValidId(commentId)
           && isValidMenderVideoComment(incoming())
+          && exists(/databases/$(database)/documents/mender_videos/$(videoId))
           && incoming().commentId == commentId
           && incoming().videoId == videoId
           && isOwner(incoming().authorId)
@@ -1333,12 +1549,19 @@ service cloud.firestore {
           && incoming().parentCommentId == existing().parentCommentId
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedByUserIds', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedByUserIds', 'updatedAt'])
+          && (
+            incoming().likesCount == existing().likesCount + 1
+            || incoming().likesCount == existing().likesCount - 1
+          );
 
         allow delete: if isVerified()
           && isValidId(videoId)
           && isValidId(commentId)
-          && isOwner(existing().authorId);
+          && (
+            isOwner(existing().authorId)
+            || get(/databases/$(database)/documents/mender_videos/$(videoId)).data.authorId == request.auth.uid
+          );
       }
     }
 
@@ -1406,9 +1629,17 @@ service cloud.firestore {
             'releaseYear', 'coverUrl', 'visibility', 'lyrics', 'updatedAt'
           ]))
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['playsCount', 'updatedAt'])
+          (
+            (existing().visibility == 'public' || isOwner(existing().uploaderId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['playsCount', 'updatedAt'])
+            && incoming().playsCount == existing().playsCount + 1
+          )
           ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt'])
+          (
+            (existing().visibility == 'public' || isOwner(existing().uploaderId))
+            && incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt'])
+            && (incoming().likesCount == existing().likesCount + 1 || incoming().likesCount == existing().likesCount - 1)
+          )
         );
 
       allow delete: if isVerified()
@@ -1416,7 +1647,7 @@ service cloud.firestore {
         && isOwner(existing().uploaderId);
 
       match /likes/{likeUserId} {
-        allow get: if isSignedIn() && isValidId(trackId) && isValidId(likeUserId);
+        allow get: if isSignedIn() && isValidId(trackId) && isValidId(likeUserId) && isOwner(likeUserId);
         allow list: if isSignedIn() && existing().trackId == trackId && isOwner(existing().userId);
 
         allow create: if isVerified()

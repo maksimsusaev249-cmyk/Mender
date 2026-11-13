@@ -1,4 +1,4 @@
-const APP_SW_VERSION = 'v7.4.0-lite';
+const APP_SW_VERSION = 'v7.5.0-lite-b10';
 const CACHE_NAME = `mender-offline-shell-${APP_SW_VERSION}`;
 const RUNTIME_CACHE = `mender-runtime-${APP_SW_VERSION}`;
 
@@ -16,7 +16,13 @@ self.addEventListener('install', event => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
-      return Promise.allSettled(CORE_ASSETS.map(url => cache.add(url)));
+      return Promise.allSettled(
+        CORE_ASSETS.map(url =>
+          fetch(url, { cache: 'no-cache' })
+            .then(res => (res && res.ok ? cache.put(url, res) : undefined))
+            .catch(() => cache.add(url))
+        )
+      );
     })
   );
 });
@@ -33,7 +39,19 @@ self.addEventListener('activate', event => {
         )
       )
       .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
+      .then(clients => {
+        clients.forEach(client => {
+          client.postMessage({ type: 'MENDER_SW_UPDATED', version: APP_SW_VERSION });
+        });
+      })
   );
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', event => {
@@ -43,22 +61,27 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url);
 
-  // Skip Firestore / Auth long-polling RPC streams (handled by Firestore persistentLocalCache in IndexedDB)
+  // Never cache dynamic API endpoints, Firebase Auth/Firestore streams, Storage uploads, or TURN requests
   if (
+    (url.origin === self.location.origin && url.pathname.startsWith('/api/')) ||
     url.hostname.includes('firestore.googleapis.com') ||
+    url.hostname.includes('firebasestorage.googleapis.com') ||
     url.hostname.includes('identitytoolkit.googleapis.com') ||
-    url.hostname.includes('securetoken.googleapis.com')
+    url.hostname.includes('securetoken.googleapis.com') ||
+    url.hostname.includes('rtc.live.cloudflare.com')
   ) {
     return;
   }
 
-  // SPA Navigation fallback: Network first, fallback to cached /index.html when offline
+  // SPA Navigation fallback: Network first (no HTTP cache), fallback to cached /index.html when offline
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(new Request(request.url, { cache: 'no-cache' }))
         .then(response => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put('/index.html', copy));
+          }
           return response;
         })
         .catch(async () => {
@@ -70,7 +93,26 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Static JS, CSS, Fonts, Images, Icons: Stale-While-Revalidate / Cache-First offline support
+  // Always prefer network for manifest/version metadata so users see updates immediately
+  if (
+    url.origin === self.location.origin &&
+    (url.pathname === '/manifest.json' || url.pathname === '/apk-build-info.json')
+  ) {
+    event.respondWith(
+      fetch(new Request(request.url, { cache: 'no-cache' }))
+        .then(response => {
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // Hashed Vite static assets (/assets/*) and fonts: Cache-first with background revalidation
   if (
     url.origin === self.location.origin ||
     url.hostname.includes('fonts.googleapis.com') ||

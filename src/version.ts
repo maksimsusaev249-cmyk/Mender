@@ -14,7 +14,7 @@ export const APP_BUILD_NUMBER = 10;
 export const APP_RELEASE_DATE = '13 ноя 2026';
 export const APK_FILE_NAME = 'Mender-Lite-Android.apk';
 export const APK_VERSIONED_NAME = `Mender-${APP_VERSION_FULL}-Android.apk`;
-export const APK_SIZE_LABEL = '0.53 МБ (≤ 20 МБ)';
+export const APK_SIZE_LABEL = '3.43 МБ (≤ 20 МБ)';
 
 export interface OfficialNewsPost {
   id: string;
@@ -44,7 +44,7 @@ export const APP_VERSION_HISTORY: VersionReleaseNote[] = [
     date: '13 ноя 2026',
     title: 'Mender Music — самостоятельная музыкальная платформа + Новая навигация и Настройки',
     badge: 'Актуальная версия',
-    apkSize: '0.53 МБ (540 КБ)',
+    apkSize: '3.43 МБ (3514 КБ)',
     highlights: [
       'Запущена отдельная музыкальная платформа Mender Music: рекомендации, чарты, новинки, 8 жанров, альбомы, страницы исполнителей, плейлисты, избранное и история.',
       'Встроенный Hi-Fi аудиоплеер с мини-плеером, полноэкранным плеером, очередью воспроизведения, перемешиванием (Shuffle), повтором (Repeat) и поддержкой MediaSession API (экран блокировки).',

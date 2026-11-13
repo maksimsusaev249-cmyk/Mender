@@ -1,12 +1,12 @@
 {
   "fileName": "Mender-Lite-Android.apk",
-  "version": "7.4.0-lite",
-  "buildNumber": 9,
+  "version": "7.5.0-lite",
+  "buildNumber": 10,
   "architecture": "arm64-v8a (System WebView + R8 Shrink + Offline PWA)",
-  "sizeBytes": 3600220,
-  "sizeKB": 3516,
+  "sizeBytes": 3598664,
+  "sizeKB": 3514,
   "sizeMB": 3.43,
   "maxLimitMB": 20,
   "filesBundled": 22,
-  "builtAt": "2026-11-13T17:12:30.252Z"
+  "builtAt": "2026-11-13T17:36:54.752Z"
 }

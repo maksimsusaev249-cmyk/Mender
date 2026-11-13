@@ -3,59 +3,99 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null && request.auth.uid is string && request.auth.uid.size() > 0;
     }
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isValidImage() {
-      return request.resource.contentType.matches('image/(jpeg|png|webp|gif)')
-        && request.resource.size <= 10 * 1024 * 1024;
+    function isSafeImageContentType() {
+      return request.resource != null
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp|gif|heic|heif)');
     }
 
-    function isValidMedia() {
-      return (
-        request.resource.contentType.matches('image/.*')
-        || request.resource.contentType.matches('video/.*')
-        || request.resource.contentType.matches('audio/.*')
-      ) && request.resource.size <= 25 * 1024 * 1024;
+    function isSafeVideoContentType() {
+      return request.resource != null
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('video/(mp4|webm|quicktime|x-matroska|ogg)');
+    }
+
+    function isSafeAudioContentType() {
+      return request.resource != null
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('audio/(mpeg|mp3|wav|x-wav|ogg|webm|mp4|aac|flac|x-flac|m4a)');
+    }
+
+    function isValidAvatarImage() {
+      return isSafeImageContentType() && request.resource.size <= 10 * 1024 * 1024;
+    }
+
+    function isValidWallpaperImage() {
+      return isSafeImageContentType() && request.resource.size <= 15 * 1024 * 1024;
+    }
+
+    function isValidChatMedia() {
+      return (isSafeImageContentType() || isSafeVideoContentType() || isSafeAudioContentType())
+        && request.resource.size <= 25 * 1024 * 1024;
+    }
+
+    function isValidMenderVideo() {
+      return (isSafeVideoContentType() || isSafeImageContentType())
+        && request.resource.size <= 150 * 1024 * 1024;
+    }
+
+    function isValidMenderMusic() {
+      return (isSafeAudioContentType() || isSafeImageContentType())
+        && request.resource.size <= 50 * 1024 * 1024;
     }
 
     match /mender_wallpapers/{userId}/{fileName} {
       allow read: if isOwner(userId);
-      allow create, update: if isOwner(userId) && isValidImage();
+      allow create, update: if isOwner(userId) && isValidWallpaperImage();
       allow delete: if isOwner(userId);
     }
 
     match /mender_avatars/{userId}/{fileName} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId) && isValidImage();
+      allow create, update: if isOwner(userId) && isValidAvatarImage();
       allow delete: if isOwner(userId);
     }
 
     match /mender_messages/{userId}/{fileName} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId) && isValidMedia();
+      allow create, update: if isOwner(userId) && isValidChatMedia();
       allow delete: if isOwner(userId);
     }
 
     match /mender_posts/{userId}/{fileName} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId) && isValidMedia();
+      allow create, update: if isOwner(userId) && isValidChatMedia();
       allow delete: if isOwner(userId);
     }
 
     match /mender_voice/{userId}/{fileName} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId) && isValidMedia();
+      allow create, update: if isOwner(userId) && isSafeAudioContentType() && request.resource.size <= 25 * 1024 * 1024;
       allow delete: if isOwner(userId);
     }
 
     match /mender_video_circles/{userId}/{fileName} {
       allow read: if isSignedIn();
-      allow create, update: if isOwner(userId) && isValidMedia();
+      allow create, update: if isOwner(userId) && isSafeVideoContentType() && request.resource.size <= 25 * 1024 * 1024;
+      allow delete: if isOwner(userId);
+    }
+
+    match /mender_videos/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId) && isValidMenderVideo();
+      allow delete: if isOwner(userId);
+    }
+
+    match /mender_music/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId) && isValidMenderMusic();
       allow delete: if isOwner(userId);
     }
 

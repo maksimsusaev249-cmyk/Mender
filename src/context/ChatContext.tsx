@@ -12,7 +12,7 @@ import {
   writeBatch,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { useAuth } from './AuthContext';
 import {
   Chat,
@@ -39,14 +39,39 @@ import {
   deleteStorageWallpaper,
 } from '../utils/media';
 
-const RTC_CONFIG: RTCConfiguration = {
+const FALLBACK_RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
   ],
+  iceCandidatePoolSize: 10,
 };
+
+async function getDynamicRtcConfig(): Promise<RTCConfiguration> {
+  try {
+    const idToken = await auth.currentUser?.getIdToken?.();
+    if (!idToken) return FALLBACK_RTC_CONFIG;
+
+    const res = await fetch('/api/turn-credentials', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${idToken}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return FALLBACK_RTC_CONFIG;
+
+    const data = (await res.json()) as { iceServers?: RTCIceServer[] };
+    if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+      return {
+        iceServers: data.iceServers,
+        iceCandidatePoolSize: 10,
+      };
+    }
+  } catch {
+    // Fallback gracefully to STUN when offline or endpoint unavailable
+  }
+  return FALLBACK_RTC_CONFIG;
+}
 
 function extractTimestampMs(ts: any, idWithTimestamp?: string): number {
   if (ts) {
@@ -673,7 +698,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           visibility: 'private',
           name: 'Mender Безопасность',
           description: 'Системные уведомления о безопасности, новых входах и защите аккаунта',
-          avatarUrl: 'https://images.unsplash.com/photo-1614064641938-3bbee52942c7?w=150&auto=format&fit=crop&q=80',
+          avatarUrl: '/icon.svg',
           ownerId: firebaseUser.uid,
           peerUserId: 'mender_security_bot',
           membersCount: 2,
@@ -1107,7 +1132,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
-      await setDoc(peerRef, peerUser);
     }
 
     return await startDirectChatWithUser(peerUser);
@@ -1314,7 +1338,6 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           };
-          await setDoc(peerRef, targetUser);
         }
       }
     } else {
@@ -2171,6 +2194,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     activeCallRef.current = null;
     setGroupCallParticipants([]);
     setIsAudioMuted(false);
+    isAudioMutedRef.current = false;
     setIsVideoMuted(false);
     isVideoMutedRef.current = false;
     setIsScreenSharing(false);
@@ -2612,7 +2636,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsVideoMuted(!hasInitialVideo);
     isVideoMutedRef.current = !hasInitialVideo;
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const rtcConfig = await getDynamicRtcConfig();
+    const pc = new RTCPeerConnection(rtcConfig);
     peerConnectionRef.current = pc;
 
     const inboundStream = new MediaStream();
@@ -2750,7 +2775,8 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsVideoMuted(!hasInitialVideo);
     isVideoMutedRef.current = !hasInitialVideo;
 
-    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const rtcConfig = await getDynamicRtcConfig();
+    const pc = new RTCPeerConnection(rtcConfig);
     peerConnectionRef.current = pc;
 
     const inboundStream = new MediaStream();

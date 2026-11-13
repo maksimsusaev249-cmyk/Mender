@@ -1,9 +1,9 @@
 {
   "id": "/",
-  "name": "Mender v7.4.0 — Мессенджер и Видео",
+  "name": "Mender v7.5.0 — Мессенджер, Видео и Музыка",
   "short_name": "Mender",
-  "version": "7.4.0-lite",
-  "description": "Удобный, лёгкий и быстрый мессенджер Mender v7.4.0 (работает онлайн и без интернета). Чаты, видеозвонки и платформа Mender Video.",
+  "version": "7.5.0-lite",
+  "description": "Защищённый и быстрый мессенджер Mender v7.5.0 (Build #10): чаты, видеозвонки WebRTC, Mender Video и Mender Music.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
