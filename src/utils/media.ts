@@ -47,13 +47,122 @@ async function getBlobFromIdb(mediaId: string): Promise<Blob | null> {
   }
 }
 
+async function deleteBlobFromIdb(mediaId: string): Promise<void> {
+  try {
+    const db = await openMediaIdb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(mediaId);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // ignore
+  }
+}
+
+async function getAllKeysFromIdb(): Promise<string[]> {
+  try {
+    const db = await openMediaIdb();
+    return await new Promise<string[]>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).getAllKeys();
+      req.onsuccess = () => resolve((req.result as string[]) || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return [];
+  }
+}
+
 /**
- * Resolves `idb://mediaId|posterDataUrl` urls into playable `blob:` URLs from memory or IndexedDB.
- * Falls back to the embedded poster/dataUrl if not found locally.
+ * Нормализует MIME-тип видео-блоба для кросс-платформенной работы плеера
+ * на iOS Safari, Android WebView, Smart TV и десктопных браузерах.
  */
-export async function resolvePlayableMediaUrl(rawUrl?: string | null): Promise<string> {
+export function normalizePlayableBlob(blob: Blob, fallbackMime = 'video/mp4'): Blob {
+  if (
+    blob.type &&
+    (blob.type.startsWith('video/') ||
+      blob.type.startsWith('audio/') ||
+      blob.type.startsWith('image/'))
+  ) {
+    if (blob.type === 'video/quicktime') {
+      return new Blob([blob], { type: 'video/mp4' });
+    }
+    return blob;
+  }
+  return new Blob([blob], { type: fallbackMime });
+}
+
+/**
+ * Преобразует `data:video/...;base64,...` в типизированный `blob:` ObjectURL.
+ * Это критично для iOS Safari и мобильных Android WebView, которые часто не могут
+ * перематывать или воспроизводить длинные base64 Data URL напрямую в <video>.
+ */
+export function dataUrlToTypedBlob(dataUrl: string, defaultMime = 'video/mp4'): Blob | null {
+  try {
+    const commaIdx = dataUrl.indexOf(',');
+    if (commaIdx < 0) return null;
+    const header = dataUrl.slice(0, commaIdx);
+    const base64 = dataUrl.slice(commaIdx + 1);
+    const mimeMatch = header.match(/data:([^;]+)/i);
+    const rawMime = mimeMatch ? mimeMatch[1] : defaultMime;
+    const mime = rawMime === 'video/quicktime' ? 'video/mp4' : rawMime;
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: mime });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves `idb://mediaId|posterDataUrl`, offline-cached `videoId`, or `data:video/...` urls
+ * into playable `blob:` URLs from memory or IndexedDB so they play across all devices and offline.
+ */
+export async function resolvePlayableMediaUrl(
+  rawUrl?: string | null,
+  videoId?: string
+): Promise<string> {
+  if (videoId) {
+    const offlineKey = `offline_vid_${videoId}`;
+    const memOffline = memoryBlobUrlCache.get(offlineKey);
+    if (memOffline) return memOffline;
+
+    const offlineBlob = await getBlobFromIdb(offlineKey);
+    if (offlineBlob && offlineBlob.size > 0) {
+      const normalized = normalizePlayableBlob(offlineBlob, 'video/mp4');
+      const objUrl = URL.createObjectURL(normalized);
+      memoryBlobUrlCache.set(offlineKey, objUrl);
+      return objUrl;
+    }
+  }
+
   if (!rawUrl) return '';
-  if (!rawUrl.startsWith('idb://')) return rawUrl;
+
+  // Конвертируем base64 видео в полноценный типизированный Blob URL для совместимости со всеми устройствами
+  if (rawUrl.startsWith('data:video/') || rawUrl.startsWith('data:audio/')) {
+    const cacheKey = `dataurl_${rawUrl.length}_${rawUrl.slice(0, 48)}`;
+    const cachedObjUrl = memoryBlobUrlCache.get(cacheKey);
+    if (cachedObjUrl) return cachedObjUrl;
+    const typedBlob = dataUrlToTypedBlob(rawUrl);
+    if (typedBlob) {
+      const objUrl = URL.createObjectURL(typedBlob);
+      memoryBlobUrlCache.set(cacheKey, objUrl);
+      if (videoId) {
+        void saveBlobToIdb(`offline_vid_${videoId}`, typedBlob);
+      }
+      return objUrl;
+    }
+    return rawUrl;
+  }
+
+  if (!rawUrl.startsWith('idb://')) {
+    return rawUrl;
+  }
 
   const withoutPrefix = rawUrl.slice('idb://'.length);
   const pipeIndex = withoutPrefix.indexOf('|');
@@ -65,12 +174,103 @@ export async function resolvePlayableMediaUrl(rawUrl?: string | null): Promise<s
 
   const blob = await getBlobFromIdb(mediaId);
   if (blob) {
-    const objUrl = URL.createObjectURL(blob);
+    const normalized = normalizePlayableBlob(blob, 'video/mp4');
+    const objUrl = URL.createObjectURL(normalized);
     memoryBlobUrlCache.set(mediaId, objUrl);
     return objUrl;
   }
 
   return fallbackDataUrl;
+}
+
+/**
+ * Проверяет, сохранено ли видео локально в памяти устройства (IndexedDB) для просмотра без интернета.
+ */
+export async function isVideoSavedOffline(videoId: string, rawVideoUrl?: string): Promise<boolean> {
+  if (!videoId) return false;
+  const offlineKey = `offline_vid_${videoId}`;
+  if (memoryBlobUrlCache.has(offlineKey)) return true;
+  const directBlob = await getBlobFromIdb(offlineKey);
+  if (directBlob && directBlob.size > 0) return true;
+
+  if (rawVideoUrl?.startsWith('idb://')) {
+    const withoutPrefix = rawVideoUrl.slice('idb://'.length);
+    const pipeIndex = withoutPrefix.indexOf('|');
+    const mediaId = pipeIndex >= 0 ? withoutPrefix.slice(0, pipeIndex) : withoutPrefix;
+    const idbBlob = await getBlobFromIdb(mediaId);
+    if (idbBlob && idbBlob.size > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Сохраняет видеоролик в локальное хранилище IndexedDB для автономного воспроизведения без интернета.
+ */
+export async function saveVideoForOffline(
+  videoId: string,
+  rawVideoUrl: string,
+  onProgress?: (pct: number) => void
+): Promise<boolean> {
+  if (!videoId || !rawVideoUrl) return false;
+  const offlineKey = `offline_vid_${videoId}`;
+  onProgress?.(10);
+
+  try {
+    if (rawVideoUrl.startsWith('idb://')) {
+      const withoutPrefix = rawVideoUrl.slice('idb://'.length);
+      const pipeIndex = withoutPrefix.indexOf('|');
+      const mediaId = pipeIndex >= 0 ? withoutPrefix.slice(0, pipeIndex) : withoutPrefix;
+      const existingBlob = await getBlobFromIdb(mediaId);
+      if (existingBlob) {
+        const normalized = normalizePlayableBlob(existingBlob, 'video/mp4');
+        await saveBlobToIdb(offlineKey, normalized);
+        memoryBlobUrlCache.set(offlineKey, URL.createObjectURL(normalized));
+        onProgress?.(100);
+        return true;
+      }
+    }
+
+    if (rawVideoUrl.startsWith('data:video/')) {
+      const blob = dataUrlToTypedBlob(rawVideoUrl);
+      if (blob) {
+        await saveBlobToIdb(offlineKey, blob);
+        memoryBlobUrlCache.set(offlineKey, URL.createObjectURL(blob));
+        onProgress?.(100);
+        return true;
+      }
+    }
+
+    onProgress?.(35);
+    const response = await fetch(rawVideoUrl);
+    if (!response.ok) return false;
+    onProgress?.(75);
+    const rawBlob = await response.blob();
+    const normalized = normalizePlayableBlob(rawBlob, 'video/mp4');
+    await saveBlobToIdb(offlineKey, normalized);
+    memoryBlobUrlCache.set(offlineKey, URL.createObjectURL(normalized));
+    onProgress?.(100);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function removeVideoFromOffline(videoId: string): Promise<void> {
+  if (!videoId) return;
+  const offlineKey = `offline_vid_${videoId}`;
+  const cachedUrl = memoryBlobUrlCache.get(offlineKey);
+  if (cachedUrl) {
+    URL.revokeObjectURL(cachedUrl);
+    memoryBlobUrlCache.delete(offlineKey);
+  }
+  await deleteBlobFromIdb(offlineKey);
+}
+
+export async function listOfflineVideoIds(): Promise<string[]> {
+  const keys = await getAllKeysFromIdb();
+  return keys
+    .filter(k => typeof k === 'string' && k.startsWith('offline_vid_'))
+    .map(k => k.slice('offline_vid_'.length));
 }
 
 export function getSyncCachedMediaUrl(rawUrl?: string | null): string {
@@ -616,94 +816,99 @@ export async function uploadVideoWithProgress(
   const storagePath = `mender_videos/${uid}/${videoId}_${safeName}`;
   onProgress(5);
 
-  try {
-    const storageRef = ref(storage, storagePath);
-    const uploadTask = uploadBytesResumable(storageRef, file, {
-      contentType: file.type || 'video/mp4',
-    });
+    const normalizedFile = normalizePlayableBlob(file, file.type || 'video/mp4');
+    const offlineKey = `offline_vid_${videoId}`;
+    const localOfflineUrl = URL.createObjectURL(normalizedFile);
+    memoryBlobUrlCache.set(offlineKey, localOfflineUrl);
+    await saveBlobToIdb(offlineKey, normalizedFile);
 
-    const downloadUrl = await new Promise<string>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        uploadTask.cancel();
-        reject(new Error('Storage upload timeout'));
-      }, 3500);
+    try {
+      const storageRef = ref(storage, storagePath);
+      const uploadTask = uploadBytesResumable(storageRef, file, {
+        contentType: file.type || 'video/mp4',
+      });
 
-      uploadTask.on(
-        'state_changed',
-        snapshot => {
-          if (snapshot.totalBytes > 0) {
-            const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 85) + 8;
-            onProgress(Math.min(95, pct));
+      const downloadUrl = await new Promise<string>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          uploadTask.cancel();
+          reject(new Error('Storage upload timeout'));
+        }, 3500);
+
+        uploadTask.on(
+          'state_changed',
+          snapshot => {
+            if (snapshot.totalBytes > 0) {
+              const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 85) + 8;
+              onProgress(Math.min(95, pct));
+            }
+          },
+          err => {
+            clearTimeout(timeout);
+            reject(err);
+          },
+          async () => {
+            clearTimeout(timeout);
+            try {
+              const url = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve(url);
+            } catch (e) {
+              reject(e);
+            }
           }
-        },
-        err => {
-          clearTimeout(timeout);
-          reject(err);
-        },
-        async () => {
-          clearTimeout(timeout);
-          try {
-            const url = await getDownloadURL(uploadTask.snapshot.ref);
-            resolve(url);
-          } catch (e) {
-            reject(e);
-          }
+        );
+      });
+
+      onProgress(100);
+      return downloadUrl;
+    } catch {
+      // Real progress fallback via FileReader + IndexedDB storage
+      onProgress(15);
+
+      if (file.size <= 380 * 1024) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onprogress = ev => {
+            if (ev.lengthComputable && ev.total > 0) {
+              const pct = 15 + Math.round((ev.loaded / ev.total) * 75);
+              onProgress(Math.min(92, pct));
+            }
+          };
+          reader.onloadend = () => {
+            if (typeof reader.result === 'string') resolve(reader.result);
+            else reject(new Error('Failed to read video file'));
+          };
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+        if (dataUrl.length <= 550000) {
+          onProgress(100);
+          return dataUrl;
         }
-      );
-    });
+      }
 
-    onProgress(100);
-    return downloadUrl;
-  } catch {
-    // Real progress fallback via FileReader + IndexedDB storage
-    onProgress(15);
-
-    if (file.size <= 380 * 1024) {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
+      // Stream chunks to measure real read progress and persist full video Blob in IndexedDB
+      await new Promise<void>((resolve, reject) => {
         const reader = new FileReader();
         reader.onprogress = ev => {
           if (ev.lengthComputable && ev.total > 0) {
-            const pct = 15 + Math.round((ev.loaded / ev.total) * 75);
-            onProgress(Math.min(92, pct));
+            const pct = 20 + Math.round((ev.loaded / ev.total) * 65);
+            onProgress(Math.min(88, pct));
           }
         };
-        reader.onloadend = () => {
-          if (typeof reader.result === 'string') resolve(reader.result);
-          else reject(new Error('Failed to read video file'));
-        };
+        reader.onloadend = () => resolve();
         reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
+        reader.readAsArrayBuffer(file);
       });
-      if (dataUrl.length <= 550000) {
-        onProgress(100);
-        return dataUrl;
-      }
+
+      const mediaId = `vid_${videoId}_${Date.now()}`;
+      memoryBlobUrlCache.set(mediaId, localOfflineUrl);
+      await saveBlobToIdb(mediaId, normalizedFile);
+      onProgress(95);
+
+      const poster =
+        fallbackPosterDataUrl || (await extractVideoPosterDataUrl(file, 640, 0.65));
+      onProgress(100);
+      return `idb://${mediaId}|${poster.slice(0, 250000)}`;
     }
-
-    // Stream chunks to measure real read progress and persist full video Blob in IndexedDB
-    await new Promise<void>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onprogress = ev => {
-        if (ev.lengthComputable && ev.total > 0) {
-          const pct = 20 + Math.round((ev.loaded / ev.total) * 65);
-          onProgress(Math.min(88, pct));
-        }
-      };
-      reader.onloadend = () => resolve();
-      reader.onerror = () => reject(reader.error);
-      reader.readAsArrayBuffer(file);
-    });
-
-    const mediaId = `vid_${videoId}_${Date.now()}`;
-    const localObjUrl = URL.createObjectURL(file);
-    memoryBlobUrlCache.set(mediaId, localObjUrl);
-    await saveBlobToIdb(mediaId, file);
-    onProgress(95);
-
-    const poster =
-      fallbackPosterDataUrl || (await extractVideoPosterDataUrl(file, 640, 0.65));
-    onProgress(100);
-    return `idb://${mediaId}|${poster.slice(0, 250000)}`;
   }
-}
 

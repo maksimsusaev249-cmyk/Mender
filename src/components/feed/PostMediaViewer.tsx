@@ -39,7 +39,10 @@ const ResolvedMediaElement: React.FC<{
           className={className}
           muted
           playsInline
-        />
+          preload="metadata"
+        >
+          <source src={resolvedUrl} type="video/mp4" />
+        </video>
       );
     }
     return (
@@ -48,8 +51,12 @@ const ResolvedMediaElement: React.FC<{
         src={resolvedUrl}
         controls
         playsInline
+        preload="metadata"
         className={className}
-      />
+      >
+        <source src={resolvedUrl} type="video/mp4" />
+        <source src={resolvedUrl} type="video/webm" />
+      </video>
     );
   }
 

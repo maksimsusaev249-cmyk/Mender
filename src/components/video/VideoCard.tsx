@@ -85,7 +85,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
     setIsHovering(true);
     if (hoverTimeoutRef.current) window.clearTimeout(hoverTimeoutRef.current);
     hoverTimeoutRef.current = window.setTimeout(async () => {
-      const url = resolvedVideoUrl || (await resolvePlayableMediaUrl(video.videoUrl));
+      const url = resolvedVideoUrl || (await resolvePlayableMediaUrl(video.videoUrl, video.videoId));
       if (url) {
         setResolvedVideoUrl(url);
         setIsPlayingPreview(true);

@@ -12,6 +12,7 @@ import {
   resolvePlayableMediaUrl,
 } from '../../utils/media';
 import { formatVideoDuration } from './VideoCard';
+import { UniversalVideoPlayer } from './UniversalVideoPlayer';
 import {
   Upload,
   Film,
@@ -910,12 +911,13 @@ export const VideoUploadStudio: React.FC = () => {
                     /* Video Player Preview */
                     <div className="rounded-xl overflow-hidden bg-black aspect-video">
                       {currentItem.previewObjectUrl ? (
-                        <video
+                        <UniversalVideoPlayer
+                          videoId={currentItem.queueId}
                           src={currentItem.previewObjectUrl}
                           poster={currentItem.selectedThumbDataUrl || undefined}
-                          controls
-                          playsInline
-                          className="w-full h-full object-contain"
+                          durationHint={currentItem.duration}
+                          autoPlay={false}
+                          title={currentItem.title || 'Предпросмотр'}
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center text-white/60 text-xs">

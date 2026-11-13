@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ChatProvider, useChat } from './context/ChatContext';
 import { VideoProvider } from './context/VideoContext';
@@ -18,7 +18,7 @@ import { WallpaperStudioModal } from './components/wallpapers/WallpaperStudioMod
 import { SearchModal } from './components/search/SearchModal';
 import { UserProfileModal } from './components/profile/UserProfileModal';
 
-import { Search, Sparkles, ChevronDown, MessageSquare, PhoneCall, Sun, Moon, Palette, Film } from 'lucide-react';
+import { Search, Sparkles, ChevronDown, MessageSquare, PhoneCall, Sun, Moon, Palette, Film, WifiOff } from 'lucide-react';
 
 const MainMessenger: React.FC = () => {
   const {
@@ -38,6 +38,20 @@ const MainMessenger: React.FC = () => {
   const [createModalType, setCreateModalType] = useState<'direct' | 'group' | null>(null);
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   if (!isAuthReady) {
     return (
@@ -187,6 +201,16 @@ const MainMessenger: React.FC = () => {
           </button>
         </div>
       </header>
+
+      {/* Индикатор работы без интернета (Автономный офлайн-режим) */}
+      {!isOnline && (
+        <div className="bg-amber-500 text-white px-3 py-1.5 text-xs font-semibold flex items-center justify-center gap-2 z-30 shrink-0 shadow-xs">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">
+            Автономный режим (без интернета) — чаты, записи и офлайн-видео работают из памяти устройства
+          </span>
+        </div>
+      )}
 
       {/* Main Full-Height Workspace */}
       <div className="relative z-10 flex-1 flex overflow-hidden h-full pb-14 md:pb-0">

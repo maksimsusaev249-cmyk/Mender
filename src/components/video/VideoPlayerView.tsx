@@ -5,6 +5,7 @@ import { useChat } from '../../context/ChatContext';
 import { MenderVideo, MenderVideoComment } from '../../types';
 import { resolvePlayableMediaUrl } from '../../utils/media';
 import { formatVideoDate, formatVideoDuration, VideoCard } from './VideoCard';
+import { UniversalVideoPlayer } from './UniversalVideoPlayer';
 import {
   ArrowLeft,
   Heart,
@@ -82,7 +83,7 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
   useEffect(() => {
     if (!video) return;
     let active = true;
-    resolvePlayableMediaUrl(video.videoUrl).then(url => {
+    resolvePlayableMediaUrl(video.videoUrl, video.videoId).then(url => {
       if (active) setResolvedVideoUrl(url);
     });
     if (video.thumbnailUrl) {
@@ -223,24 +224,24 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ onOpenPlaylist
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         {/* Main Column: Player + Info + Author + Comments */}
         <div className="xl:col-span-8 space-y-4">
-          {/* Video Player Container */}
-          <div className="bg-black rounded-2xl overflow-hidden aspect-video border border-[#E1E3E6] shadow-xs">
-            {resolvedVideoUrl ? (
-              <video
-                key={video.videoId}
-                src={resolvedVideoUrl}
-                poster={resolvedPosterUrl || undefined}
-                controls
-                autoPlay
-                playsInline
-                className="w-full h-full object-contain"
-              />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-white/70 text-xs">
-                Загрузка видеопотока...
-              </div>
-            )}
-          </div>
+          {/* Universal Cross-Device Video Player (iOS, Android, WebView, Desktop + Offline Cache) */}
+          {resolvedVideoUrl ? (
+            <UniversalVideoPlayer
+              key={video.videoId}
+              videoId={video.videoId}
+              src={resolvedVideoUrl}
+              rawVideoUrl={video.videoUrl}
+              poster={resolvedPosterUrl || undefined}
+              mimeType={video.mimeType || 'video/mp4'}
+              durationHint={video.duration}
+              autoPlay
+              title={video.title}
+            />
+          ) : (
+            <div className="bg-black rounded-2xl overflow-hidden aspect-video border border-[#E1E3E6] shadow-xs flex items-center justify-center text-white/70 text-xs">
+              Загрузка видеопотока...
+            </div>
+          )}
 
           {/* Video Details & Action Bar */}
           <div className="bg-white border border-[#E1E3E6] rounded-xl p-3.5 sm:p-5 space-y-3.5 sm:space-y-4">

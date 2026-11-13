@@ -368,9 +368,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const uid = firebaseUser.uid;
     const publicRef = doc(db, 'users', uid);
     const privateRef = doc(db, 'users_private', uid);
+    const offlineProfileKey = `mender_offline_profile_${uid}`;
+    const offlinePrivateKey = `mender_offline_private_${uid}`;
 
     let publicLoaded = false;
     let privateLoaded = false;
+
+    // Мгновенное восстановление профиля из локального кэша для работы без интернета (Офлайн-режим)
+    try {
+      const cachedPub = localStorage.getItem(offlineProfileKey);
+      const cachedPriv = localStorage.getItem(offlinePrivateKey);
+      if (cachedPub) {
+        setProfile(JSON.parse(cachedPub) as UserPublic);
+        publicLoaded = true;
+      }
+      if (cachedPriv) {
+        const parsedPriv = JSON.parse(cachedPriv) as UserPrivate;
+        setPrivateData(parsedPriv);
+        if (!parsedPriv.pinHash) {
+          setIsPinVerified(true);
+        } else {
+          const verifiedInSession =
+            sessionStorage.getItem(getPinVerifiedStorageKey(uid)) === 'true';
+          setIsPinVerified(verifiedInSession);
+        }
+        privateLoaded = true;
+      }
+      if (publicLoaded && privateLoaded) {
+        setIsAuthReady(true);
+      }
+    } catch {
+      // ignore localStorage parse errors
+    }
 
     const checkReady = () => {
       if (publicLoaded && privateLoaded) {
@@ -382,8 +411,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       publicRef,
       snap => {
         if (snap.exists()) {
-          setProfile(snap.data() as UserPublic);
-        } else {
+          const pubData = snap.data() as UserPublic;
+          setProfile(pubData);
+          try {
+            localStorage.setItem(offlineProfileKey, JSON.stringify(pubData));
+          } catch {
+            // ignore
+          }
+        } else if (!publicLoaded) {
           setProfile(null);
         }
         publicLoaded = true;
@@ -392,7 +427,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       err => {
         publicLoaded = true;
         checkReady();
-        handleFirestoreError(err, OperationType.GET, `users/${uid}`);
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          handleFirestoreError(err, OperationType.GET, `users/${uid}`);
+        }
       }
     );
 
@@ -402,6 +439,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (snap.exists()) {
           const data = snap.data() as UserPrivate;
           setPrivateData(data);
+          try {
+            localStorage.setItem(offlinePrivateKey, JSON.stringify(data));
+          } catch {
+            // ignore
+          }
           if (!data.pinHash) {
             setIsPinVerified(true);
           } else {
@@ -409,7 +451,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               sessionStorage.getItem(getPinVerifiedStorageKey(uid)) === 'true';
             setIsPinVerified(verifiedInSession);
           }
-        } else {
+        } else if (!privateLoaded) {
           setPrivateData(null);
         }
         privateLoaded = true;
@@ -418,7 +460,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       err => {
         privateLoaded = true;
         checkReady();
-        handleFirestoreError(err, OperationType.GET, `users_private/${uid}`);
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          handleFirestoreError(err, OperationType.GET, `users_private/${uid}`);
+        }
       }
     );
 
@@ -431,7 +475,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       snap => {
         setBlocks(snap.docs.map(d => d.data() as UserBlock));
       },
-      err => handleFirestoreError(err, OperationType.LIST, `users_private/${uid}/blocks`)
+      err => {
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          handleFirestoreError(err, OperationType.LIST, `users_private/${uid}/blocks`);
+        }
+      }
     );
 
     const subsQuery = query(
@@ -443,7 +491,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       snap => {
         setSubscriptions(snap.docs.map(d => d.data() as Subscription));
       },
-      err => handleFirestoreError(err, OperationType.LIST, `users/${uid}/subscriptions`)
+      err => {
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          handleFirestoreError(err, OperationType.LIST, `users/${uid}/subscriptions`);
+        }
+      }
     );
 
     // Register / update current session in Firestore
@@ -451,28 +503,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let currentIp = '178.154.201.55';
     const sessRef = doc(db, 'users', uid, 'activeSessions', currentSessionId);
 
-    fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(2000) })
-      .then(res => res.json())
-      .then(data => {
-        if (data.ip) currentIp = data.ip;
-      })
-      .catch(() => {})
-      .finally(() => {
-        setDoc(
-          sessRef,
-          {
-            sessionId: currentSessionId,
-            userId: uid,
-            device: deviceStr,
-            ip: currentIp,
-            status: 'active',
-            lastActiveAt: serverTimestamp(),
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        ).catch(() => {});
-      });
+    const saveCurrentSessionDoc = () => {
+      setDoc(
+        sessRef,
+        {
+          sessionId: currentSessionId,
+          userId: uid,
+          device: deviceStr,
+          ip: currentIp,
+          status: 'active',
+          lastActiveAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    };
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      saveCurrentSessionDoc();
+    } else {
+      fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(2000) })
+        .then(res => res.json())
+        .then(data => {
+          if (data.ip) currentIp = data.ip;
+        })
+        .catch(() => {})
+        .finally(saveCurrentSessionDoc);
+    }
 
     const sessionsQuery = query(
       collection(db, 'users', uid, 'activeSessions'),

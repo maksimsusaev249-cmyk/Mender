@@ -173,6 +173,61 @@ android {
     }
 }`;
 
+function createPngChunk(type, data) {
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length, 0);
+  const typeBuf = Buffer.from(type, 'ascii');
+  const crcBuf = Buffer.alloc(4);
+  crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])), 0);
+  return Buffer.concat([len, typeBuf, data, crcBuf]);
+}
+
+function createSolidBrandPng(size) {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // color type: RGB
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  const rowLen = 1 + size * 3;
+  const raw = Buffer.alloc(rowLen * size);
+  for (let y = 0; y < size; y++) {
+    const rowStart = y * rowLen;
+    raw[rowStart] = 0; // filter type 0
+    for (let x = 0; x < size; x++) {
+      const px = rowStart + 1 + x * 3;
+      raw[px] = 0x00;     // R (#0077FF)
+      raw[px + 1] = 0x77; // G
+      raw[px + 2] = 0xff; // B
+    }
+  }
+
+  const idat = zlib.deflateSync(raw, { level: 9 });
+  return Buffer.concat([
+    signature,
+    createPngChunk('IHDR', ihdr),
+    createPngChunk('IDAT', idat),
+    createPngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+// Гарантируем наличие PNG-иконок для iOS Safari и Android PWA оффлайн-установки
+for (const [iconName, dim] of [
+  ['pwa-192.png', 192],
+  ['pwa-512.png', 512],
+  ['apple-touch-icon.png', 180],
+]) {
+  const pngBuf = createSolidBrandPng(dim);
+  fs.writeFileSync(path.join(publicDir, iconName), pngBuf);
+  if (fs.existsSync(distDir)) {
+    fs.writeFileSync(path.join(distDir, iconName), pngBuf);
+  }
+}
+
 const entries = [
   { name: 'AndroidManifest.xml', data: androidManifestXml },
   { name: 'META-INF/MANIFEST.MF', data: 'Manifest-Version: 1.0\r\nCreated-By: Mender Lite APK Builder (arm64-v8a)\r\n\r\n' },
