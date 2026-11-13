@@ -371,4 +371,83 @@ export interface VideoNotification {
   createdAt?: any;
 }
 
+export type MusicGenre =
+  | 'Электроника'
+  | 'Lo-Fi & Chill'
+  | 'Синтвейв'
+  | 'Хип-Хоп & R&B'
+  | 'Инди & Рок'
+  | 'Эмбиент'
+  | 'Неоклассика'
+  | 'Поп';
+
+export type MusicRepeatMode = 'off' | 'all' | 'one';
+
+export interface MenderMusicTrack {
+  trackId: string;
+  uploaderId: string;
+  uploaderName: string;
+  uploaderUsername: string;
+  uploaderAvatar: string;
+  title: string;
+  artist: string;
+  artistId: string;
+  albumTitle: string;
+  albumId: string;
+  genre: string;
+  releaseYear: number;
+  audioUrl: string;
+  coverUrl: string;
+  duration: number; // in seconds
+  sizeBytes: number;
+  mimeType: string;
+  visibility: VisibilityType;
+  playsCount: number;
+  likesCount: number;
+  lyrics: string;
+  isBuiltIn?: boolean;
+  synthPreset?: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface MenderMusicPlaylist {
+  playlistId: string;
+  ownerId: string;
+  ownerName: string;
+  ownerUsername: string;
+  ownerAvatar: string;
+  title: string;
+  description: string;
+  visibility: VisibilityType;
+  trackIds: string[];
+  coverUrl: string;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface MenderMusicAlbum {
+  albumId: string;
+  title: string;
+  artist: string;
+  artistId: string;
+  genre: string;
+  releaseYear: number;
+  coverUrl: string;
+  description: string;
+  trackIds: string[];
+}
+
+export interface MenderMusicArtist {
+  artistId: string;
+  name: string;
+  genre: string;
+  avatarUrl: string;
+  coverBannerUrl: string;
+  bio: string;
+  monthlyListeners: number;
+  verified: boolean;
+}
+
+
 

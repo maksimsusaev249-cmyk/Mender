@@ -93,7 +93,7 @@ interface ChatContextType {
   postComments: Record<string, PostComment[]>;
   commentLikesByMe: Record<string, boolean>;
   commentLikesCount: Record<string, number>;
-  activeTab: 'chats' | 'feed' | 'video' | 'calls' | 'channels' | 'settings';
+  activeTab: 'chats' | 'feed' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu';
   searchQuery: string;
   // Wallpapers state & actions
   wallpaperConfigs: Record<string, WallpaperConfig>;
@@ -127,7 +127,7 @@ interface ChatContextType {
   selectedCameraId: string;
   groupCallParticipants: GroupCallParticipant[];
   // Actions
-  setActiveTab: (tab: 'chats' | 'feed' | 'video' | 'calls' | 'channels' | 'settings') => void;
+  setActiveTab: (tab: 'chats' | 'feed' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu') => void;
   setActiveChatId: (chatId: string | null) => void;
   setSearchQuery: (q: string) => void;
   startDirectChatWithUser: (peerUser: UserPublic) => Promise<string>;
@@ -267,7 +267,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const [activeTab, setActiveTab] = useState<'chats' | 'feed' | 'video' | 'calls' | 'channels' | 'settings'>('chats');
+  const [activeTab, setActiveTab] = useState<'chats' | 'feed' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu'>('chats');
   const [searchQuery, setSearchQuery] = useState('');
   const [myProfileFolders, setMyProfileFolders] = useState<ProfileFolder[]>([]);
   const [viewedUserProfile, setViewedUserProfile] = useState<UserPublic | null>(null);

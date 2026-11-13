@@ -127,8 +127,8 @@ function collectFilesRecursively(dir, prefix = '') {
 const androidManifestXml = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="app.mender.messenger"
-    android:versionCode="7"
-    android:versionName="7.2.0-lite">
+    android:versionCode="9"
+    android:versionName="7.4.0-lite">
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -158,8 +158,8 @@ android {
         applicationId "app.mender.messenger"
         minSdk 24
         targetSdk 34
-        versionCode 7
-        versionName "7.2.0-lite"
+        versionCode 9
+        versionName "7.4.0-lite"
         ndk {
             abiFilters "arm64-v8a"
         }
@@ -254,8 +254,9 @@ if (fs.existsSync(distDir)) {
 
 const buildInfo = {
   fileName: 'Mender-Lite-Android.apk',
-  version: '7.2.0-lite',
-  architecture: 'arm64-v8a (System WebView + R8 Shrink)',
+  version: '7.4.0-lite',
+  buildNumber: 9,
+  architecture: 'arm64-v8a (System WebView + R8 Shrink + Offline PWA)',
   sizeBytes,
   sizeKB: Math.round(sizeBytes / 1024),
   sizeMB,

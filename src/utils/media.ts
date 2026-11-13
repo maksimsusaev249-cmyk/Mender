@@ -912,3 +912,153 @@ export async function uploadVideoWithProgress(
     }
   }
 
+/**
+ * Validates audio file format and size (up to 50 MB) for Mender Music.
+ */
+export function validateAudioFile(file: File): string | null {
+  if (!file) return 'Аудиофайл не выбран.';
+  const allowedMimes = [
+    'audio/mpeg',
+    'audio/mp3',
+    'audio/wav',
+    'audio/x-wav',
+    'audio/wave',
+    'audio/ogg',
+    'audio/mp4',
+    'audio/x-m4a',
+    'audio/aac',
+    'audio/flac',
+    'audio/x-flac',
+    'audio/webm',
+  ];
+  const hasValidExt = /\.(mp3|wav|ogg|m4a|aac|flac|webm|opus)$/i.test(file.name);
+  if (!allowedMimes.includes(file.type) && !hasValidExt) {
+    return 'Неподдерживаемый формат аудио. Разрешены MP3, WAV, FLAC, OGG, M4A, AAC и WebM.';
+  }
+  if (file.size <= 0) {
+    return 'Выбран пустой аудиофайл.';
+  }
+  const maxBytes = 50 * 1024 * 1024; // 50 MB
+  if (file.size > maxBytes) {
+    return `Размер аудиофайла (${(file.size / (1024 * 1024)).toFixed(1)} МБ) превышает максимально допустимые 50 МБ.`;
+  }
+  return null;
+}
+
+/**
+ * Extracts real duration (in seconds) from an audio File using HTML5 Audio.
+ */
+export async function extractAudioDuration(audioFile: File): Promise<number> {
+  return new Promise(resolve => {
+    const audio = document.createElement('audio');
+    const objUrl = URL.createObjectURL(audioFile);
+    let settled = false;
+
+    const finish = (dur: number) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(objUrl);
+      resolve(Math.max(1, Math.round(dur)));
+    };
+
+    const timeout = window.setTimeout(() => finish(180), 4000);
+    audio.preload = 'metadata';
+    audio.onloadedmetadata = () => {
+      clearTimeout(timeout);
+      const d = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 180;
+      finish(d);
+    };
+    audio.onerror = () => {
+      clearTimeout(timeout);
+      finish(180);
+    };
+    audio.src = objUrl;
+  });
+}
+
+/**
+ * Uploads an audio track to Firebase Storage `mender_music/{uid}/{trackId}_{name}` with progress (0..100%),
+ * and caches the audio Blob in IndexedDB (`idb://`) so it works seamlessly online and offline.
+ */
+export async function uploadAudioTrackWithProgress(
+  file: File,
+  uid: string,
+  trackId: string,
+  onProgress: (percent: number) => void
+): Promise<string> {
+  const validationErr = validateAudioFile(file);
+  if (validationErr) {
+    throw new Error(validationErr);
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `mender_music/${uid}/${trackId}_${safeName}`;
+  onProgress(8);
+
+  const normalizedAudio = normalizePlayableBlob(file, file.type || 'audio/mpeg');
+  const mediaId = `aud_${trackId}`;
+  const localObjUrl = URL.createObjectURL(normalizedAudio);
+  memoryBlobUrlCache.set(mediaId, localObjUrl);
+  await saveBlobToIdb(mediaId, normalizedAudio);
+
+  try {
+    const storageRef = ref(storage, storagePath);
+    const uploadTask = uploadBytesResumable(storageRef, file, {
+      contentType: file.type || 'audio/mpeg',
+    });
+
+    const downloadUrl = await new Promise<string>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        uploadTask.cancel();
+        reject(new Error('Storage upload timeout'));
+      }, 3500);
+
+      uploadTask.on(
+        'state_changed',
+        snapshot => {
+          if (snapshot.totalBytes > 0) {
+            const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 85) + 10;
+            onProgress(Math.min(95, pct));
+          }
+        },
+        err => {
+          clearTimeout(timeout);
+          reject(err);
+        },
+        async () => {
+          clearTimeout(timeout);
+          try {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            resolve(url);
+          } catch (e) {
+            reject(e);
+          }
+        }
+      );
+    });
+
+    onProgress(100);
+    return downloadUrl;
+  } catch {
+    onProgress(30);
+
+    if (file.size <= 380 * 1024) {
+      try {
+        const dataUrl = await blobToDataUrl(file);
+        if (dataUrl.length <= 550000) {
+          onProgress(100);
+          return dataUrl;
+        }
+      } catch {
+        // fallback to IndexedDB
+      }
+    }
+
+    onProgress(85);
+    await saveBlobToIdb(mediaId, normalizedAudio);
+    onProgress(100);
+    return `idb://${mediaId}|`;
+  }
+}
+
+

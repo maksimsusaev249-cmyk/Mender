@@ -15,11 +15,18 @@ import {
   Share2,
   CheckCircle2,
   Pencil,
+  ExternalLink,
+  Sparkles,
 } from 'lucide-react';
 import { Post, PostComment } from '../../types';
 import { MENDER_WALLPAPERS } from '../../data/menderWallpapers';
 import { WhatsNewComposer } from './WhatsNewComposer';
 import { PostMediaViewer } from './PostMediaViewer';
+import {
+  OFFICIAL_MENDER_COMMUNITY_ID,
+  APP_VERSION_FULL,
+  APP_BUILD_NUMBER,
+} from '../../version';
 
 export const SocialFeed: React.FC = () => {
   const {
@@ -40,6 +47,7 @@ export const SocialFeed: React.FC = () => {
     openUserProfile,
     startDirectChatWithUser,
     usersDirectory,
+    setActiveTab,
   } = useChat();
   const { profile, toggleSubscription, isSubscribed, isUserBlocked } = useAuth();
 
@@ -48,6 +56,20 @@ export const SocialFeed: React.FC = () => {
   const [showSearch, setShowSearch] = useState(false);
   const [welcomeLiked, setWelcomeLiked] = useState(true);
   const [welcomeLikesCount, setWelcomeLikesCount] = useState(12500);
+
+  const isSubscribedToOfficial = isSubscribed(OFFICIAL_MENDER_COMMUNITY_ID);
+
+  const openOfficialMenderCommunity = () => {
+    try {
+      sessionStorage.setItem('mender_open_official_community', '1');
+    } catch {
+      // ignore
+    }
+    setActiveTab('channels');
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('mender:open-official-community'));
+    }, 30);
+  };
 
   const [postContent, setPostContent] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -241,77 +263,140 @@ export const SocialFeed: React.FC = () => {
         </div>
 
         {/* Official Mender Featured Card */}
-        {feedTab === 'recommended' && !searchQuery.trim() && (
-          <div className="bg-white border border-[#E1E3E6] rounded-xl p-4 mb-3 space-y-3 shadow-xs">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[#0077FF] flex items-center justify-center text-white font-bold text-sm shadow-xs">
-                  M
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <h4 className="text-sm font-semibold text-[#2A5885] hover:underline cursor-pointer">
-                      Mender
-                    </h4>
-                    <CheckCircle2 className="w-4 h-4 text-[#0077FF] fill-[#0077FF]/20" />
+        {(feedTab === 'recommended' || (feedTab === 'subscriptions' && isSubscribedToOfficial)) &&
+          !searchQuery.trim() && (
+            <div className="bg-white border border-[#E1E3E6] rounded-xl p-4 mb-3 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div
+                  onClick={openOfficialMenderCommunity}
+                  className="flex items-center gap-3 cursor-pointer group"
+                  title="Открыть официальное сообщество Mender"
+                >
+                  <div className="w-10 h-10 rounded-full bg-[#0077FF] flex items-center justify-center text-white font-bold text-sm shadow-xs group-hover:scale-105 transition-transform">
+                    M
                   </div>
-                  <p className="text-[11px] text-[#818C99]">Официальное сообщество</p>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <h4 className="text-sm font-semibold text-[#2A5885] group-hover:underline">
+                        Mender
+                      </h4>
+                      <CheckCircle2 className="w-4 h-4 text-[#0077FF] fill-[#0077FF]/20" />
+                      <span className="px-2 py-0.5 rounded bg-[#EBF3FF] text-[#0077FF] text-[10px] font-bold">
+                        {APP_VERSION_FULL}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#818C99] group-hover:text-[#0077FF] transition-colors">
+                      Официальное сообщество · Нажмите, чтобы открыть новости
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => toggleSubscription(OFFICIAL_MENDER_COMMUNITY_ID, 'channel')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                      isSubscribedToOfficial
+                        ? 'bg-[#E5EBF1] text-[#2A5885] hover:bg-[#DCE3EA]'
+                        : 'bg-[#0077FF] text-white hover:bg-[#0066EA]'
+                    }`}
+                  >
+                    {isSubscribedToOfficial ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-[#0077FF]" />
+                        <span>Вы подписаны</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>Подписаться</span>
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
-            </div>
 
-            <p className="text-sm text-[#19191A] leading-relaxed">
-              Добро пожаловать в Mender! ✨{'\n'}
-              Удобный, лёгкий и быстрый мессенджер. Общайтесь в чатах, делитесь новостями и созванивайтесь!
-            </p>
-
-            <div className="relative w-full h-44 rounded-xl overflow-hidden border border-[#E1E3E6]">
-              {cosmicBanner && (
-                <img
-                  src={cosmicBanner}
-                  alt="Mender Banner"
-                  className="w-full h-full object-cover"
-                />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex flex-col items-center justify-end p-4">
-                <span className="text-base font-bold text-white drop-shadow">
-                  Mender
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3 pt-1 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => {
-                  setWelcomeLiked(prev => !prev);
-                  setWelcomeLikesCount(prev => (welcomeLiked ? prev - 1 : prev + 1));
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors cursor-pointer ${
-                  welcomeLiked
-                    ? 'bg-[#FFEAEA] text-[#E64646]'
-                    : 'bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#818C99]'
-                }`}
+              <div
+                onClick={openOfficialMenderCommunity}
+                className="space-y-2 cursor-pointer"
               >
-                <Heart className={`w-4 h-4 ${welcomeLiked ? 'fill-current' : ''}`} />
-                <span>{(welcomeLikesCount / 1000).toFixed(1)}K</span>
-              </button>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#F0F2F5] text-[#818C99]">
-                <MessageSquare className="w-4 h-4" />
-                <span>742</span>
+                <p className="text-sm text-[#19191A] leading-relaxed">
+                  Добро пожаловать в <b>Официальное сообщество Mender</b>! ✨{'\n'}
+                  Вышло обновление <b>{APP_VERSION_FULL} (Build #{APP_BUILD_NUMBER})</b>: работа без интернета, офлайн-сохранение видео, универсальный плеер для всех устройств и сборка APK до 20 МБ.
+                </p>
+
+                <div className="relative w-full h-44 rounded-xl overflow-hidden border border-[#E1E3E6] group">
+                  {cosmicBanner && (
+                    <img
+                      src={cosmicBanner}
+                      alt="Mender Banner"
+                      className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300"
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent flex flex-col items-center justify-end p-4 text-center">
+                    <span className="text-base font-bold text-white drop-shadow">
+                      Mender — Официальное сообщество
+                    </span>
+                    <span className="text-[11px] text-white/90 mt-0.5">
+                      Перейти к новостям и истории обновлений ({APP_VERSION_FULL}) →
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#F0F2F5] text-[#818C99]">
-                <Share2 className="w-4 h-4" />
-                <span>1.1K</span>
+
+              <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+                <div className="flex items-center gap-2.5 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWelcomeLiked(prev => !prev);
+                      setWelcomeLikesCount(prev => (welcomeLiked ? prev - 1 : prev + 1));
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full transition-colors cursor-pointer ${
+                      welcomeLiked
+                        ? 'bg-[#FFEAEA] text-[#E64646]'
+                        : 'bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#818C99]'
+                    }`}
+                  >
+                    <Heart className={`w-4 h-4 ${welcomeLiked ? 'fill-current' : ''}`} />
+                    <span>{(welcomeLikesCount / 1000).toFixed(1)}K</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openOfficialMenderCommunity}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#818C99] transition-colors cursor-pointer"
+                    title="Открыть комментарии в официальном сообществе"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>742</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openOfficialMenderCommunity}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#F0F2F5] hover:bg-[#E5E7EB] text-[#818C99] transition-colors cursor-pointer"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span>1.1K</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={openOfficialMenderCommunity}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#EBF3FF] hover:bg-[#DCEBff] text-[#0077FF] text-xs font-bold transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Перейти в сообщество</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
         {/* Posts Stream */}
         <div className="space-y-3">
-          {visiblePosts.length === 0 ? (
-            <div className="bg-white border border-[#E1E3E6] rounded-xl p-6 text-center text-[#818C99] space-y-2">
+          {visiblePosts.length === 0 && !(feedTab === 'subscriptions' && isSubscribedToOfficial) ? (
+            <div className="bg-white border border-[#E1E3E6] rounded-xl p-6 text-center text-[#818C99] space-y-3">
               <h3 className="text-sm font-semibold text-[#19191A]">
                 {feedTab === 'subscriptions'
                   ? 'Нет записей от ваших подписок'
@@ -320,8 +405,30 @@ export const SocialFeed: React.FC = () => {
                   : 'Записей в ленте пока нет'}
               </h3>
               <p className="text-xs">
-                Опубликуйте первую запись с фото или видео — она сразу появится в новостях!
+                {feedTab === 'subscriptions'
+                  ? 'Подпишитесь на Официальное сообщество Mender, чтобы следить за новостями и новыми версиями!'
+                  : 'Опубликуйте первую запись с фото или видео — она сразу появится в новостях!'}
               </p>
+              {feedTab === 'subscriptions' && !isSubscribedToOfficial && (
+                <div className="pt-1 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleSubscription(OFFICIAL_MENDER_COMMUNITY_ID, 'channel')}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0077FF] hover:bg-[#0066EA] text-white text-xs font-semibold cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>Подписаться на сообщество Mender</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openOfficialMenderCommunity}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#EBF3FF] hover:bg-[#DCEBff] text-[#0077FF] text-xs font-semibold cursor-pointer"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Открыть сообщество Mender</span>
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             visiblePosts.map((post: Post) => {

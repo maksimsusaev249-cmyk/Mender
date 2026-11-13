@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Plus,
   X,
@@ -44,6 +44,37 @@ export const WhatsNewComposer: React.FC<WhatsNewComposerProps> = ({
   const [isPublishing, setIsPublishing] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const triggerComposer = (mode: string) => {
+      setIsOpen(true);
+      if (mode === 'photo') {
+        setTimeout(() => {
+          fileInputRef.current?.click();
+        }, 120);
+      }
+    };
+
+    try {
+      const pendingMode = sessionStorage.getItem('mender_open_composer');
+      if (pendingMode) {
+        sessionStorage.removeItem('mender_open_composer');
+        triggerComposer(pendingMode);
+      }
+    } catch {
+      // ignore
+    }
+
+    const handleOpenComposer = (e: Event) => {
+      const custom = e as CustomEvent<{ mode?: string }>;
+      triggerComposer(custom.detail?.mode || 'post');
+    };
+
+    window.addEventListener('mender:open-composer', handleOpenComposer);
+    return () => {
+      window.removeEventListener('mender:open-composer', handleOpenComposer);
+    };
+  }, []);
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);

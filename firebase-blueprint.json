@@ -621,6 +621,105 @@
         "isRead",
         "createdAt"
       ]
+    },
+    "MenderMusicTrack": {
+      "title": "MenderMusicTrack",
+      "description": "Uploaded or published audio track in Mender Music with cover art, genre, album, artist, and real audio URL.",
+      "type": "object",
+      "properties": {
+        "trackId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uploaderId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "uploaderName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "uploaderUsername": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "uploaderAvatar": { "type": "string", "maxLength": 2000 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "artist": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "artistId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "albumTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "albumId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "genre": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "releaseYear": { "type": "integer" },
+        "audioUrl": { "type": "string", "minLength": 1, "maxLength": 2000000 },
+        "coverUrl": { "type": "string", "maxLength": 1000000 },
+        "duration": { "type": "integer" },
+        "sizeBytes": { "type": "integer" },
+        "mimeType": { "type": "string", "maxLength": 64 },
+        "visibility": { "type": "string", "enum": ["public", "private"] },
+        "playsCount": { "type": "integer" },
+        "likesCount": { "type": "integer" },
+        "lyrics": { "type": "string", "maxLength": 5000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "trackId",
+        "uploaderId",
+        "uploaderName",
+        "uploaderUsername",
+        "uploaderAvatar",
+        "title",
+        "artist",
+        "artistId",
+        "albumTitle",
+        "albumId",
+        "genre",
+        "releaseYear",
+        "audioUrl",
+        "coverUrl",
+        "duration",
+        "sizeBytes",
+        "mimeType",
+        "visibility",
+        "playsCount",
+        "likesCount",
+        "lyrics",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MenderMusicLike": {
+      "title": "MenderMusicLike",
+      "description": "User favorite/like on a Mender Music track.",
+      "type": "object",
+      "properties": {
+        "trackId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["trackId", "userId", "createdAt"]
+    },
+    "MenderMusicPlaylist": {
+      "title": "MenderMusicPlaylist",
+      "description": "User-created music playlist in Mender Music.",
+      "type": "object",
+      "properties": {
+        "playlistId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "ownerName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "ownerUsername": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "ownerAvatar": { "type": "string", "maxLength": 2000 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "visibility": { "type": "string", "enum": ["public", "private"] },
+        "trackIds": { "type": "array" },
+        "coverUrl": { "type": "string", "maxLength": 1000000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "playlistId",
+        "ownerId",
+        "ownerName",
+        "ownerUsername",
+        "ownerAvatar",
+        "title",
+        "description",
+        "visibility",
+        "trackIds",
+        "coverUrl",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -707,6 +806,18 @@
     "/video_playlists/{playlistId}": {
       "schema": "VideoPlaylist",
       "description": "Public and private video playlists."
+    },
+    "/mender_music_tracks/{trackId}": {
+      "schema": "MenderMusicTrack",
+      "description": "Published or private audio tracks in Mender Music."
+    },
+    "/mender_music_tracks/{trackId}/likes/{userId}": {
+      "schema": "MenderMusicLike",
+      "description": "User likes/favorites on a Mender Music track."
+    },
+    "/mender_music_playlists/{playlistId}": {
+      "schema": "MenderMusicPlaylist",
+      "description": "User-created music playlists in Mender Music."
     },
     "/calls/{callId}": {
       "schema": "CallSession",

@@ -1,5 +1,6 @@
-const CACHE_NAME = 'mender-offline-shell-v2';
-const RUNTIME_CACHE = 'mender-runtime-v2';
+const APP_SW_VERSION = 'v7.4.0-lite';
+const CACHE_NAME = `mender-offline-shell-${APP_SW_VERSION}`;
+const RUNTIME_CACHE = `mender-runtime-${APP_SW_VERSION}`;
 
 const CORE_ASSETS = [
   '/',

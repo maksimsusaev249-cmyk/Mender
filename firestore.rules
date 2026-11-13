@@ -543,6 +543,76 @@ service cloud.firestore {
       && data.createdAt is timestamp;
     }
 
+    function isValidMenderMusicTrack(data) {
+      return data.keys().hasAll([
+        'trackId', 'uploaderId', 'uploaderName', 'uploaderUsername', 'uploaderAvatar',
+        'title', 'artist', 'artistId', 'albumTitle', 'albumId', 'genre', 'releaseYear',
+        'audioUrl', 'coverUrl', 'duration', 'sizeBytes', 'mimeType',
+        'visibility', 'playsCount', 'likesCount', 'lyrics', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'trackId', 'uploaderId', 'uploaderName', 'uploaderUsername', 'uploaderAvatar',
+        'title', 'artist', 'artistId', 'albumTitle', 'albumId', 'genre', 'releaseYear',
+        'audioUrl', 'coverUrl', 'duration', 'sizeBytes', 'mimeType',
+        'visibility', 'playsCount', 'likesCount', 'lyrics', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.trackId)
+      && isValidId(data.uploaderId)
+      && data.uploaderName is string && data.uploaderName.size() >= 1 && data.uploaderName.size() <= 80
+      && data.uploaderUsername is string && data.uploaderUsername.size() >= 1 && data.uploaderUsername.size() <= 40
+      && data.uploaderAvatar is string && data.uploaderAvatar.size() <= 2000
+      && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+      && data.artist is string && data.artist.size() >= 1 && data.artist.size() <= 100
+      && data.artistId is string && data.artistId.size() >= 1 && data.artistId.size() <= 128
+      && data.albumTitle is string && data.albumTitle.size() >= 1 && data.albumTitle.size() <= 120
+      && data.albumId is string && data.albumId.size() >= 1 && data.albumId.size() <= 128
+      && data.genre is string && data.genre.size() >= 1 && data.genre.size() <= 60
+      && data.releaseYear is int && data.releaseYear >= 1900 && data.releaseYear <= 2100
+      && data.audioUrl is string && data.audioUrl.size() >= 1 && data.audioUrl.size() <= 2000000
+      && data.coverUrl is string && data.coverUrl.size() <= 1000000
+      && (data.duration is int || data.duration is float) && data.duration >= 0
+      && data.sizeBytes is int && data.sizeBytes >= 0
+      && data.mimeType is string && data.mimeType.size() >= 3 && data.mimeType.size() <= 64
+      && data.visibility is string && data.visibility.size() <= 20 && data.visibility in ['public', 'private']
+      && data.playsCount is int && data.playsCount >= 0
+      && data.likesCount is int && data.likesCount >= 0
+      && data.lyrics is string && data.lyrics.size() <= 5000
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidMenderMusicLike(data) {
+      return data.keys().hasAll(['trackId', 'userId', 'createdAt'])
+      && data.keys().hasOnly(['trackId', 'userId', 'createdAt'])
+      && isValidId(data.trackId)
+      && isValidId(data.userId)
+      && isOwner(data.userId)
+      && data.createdAt is timestamp;
+    }
+
+    function isValidMenderMusicPlaylist(data) {
+      return data.keys().hasAll([
+        'playlistId', 'ownerId', 'ownerName', 'ownerUsername', 'ownerAvatar',
+        'title', 'description', 'visibility', 'trackIds', 'coverUrl', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'playlistId', 'ownerId', 'ownerName', 'ownerUsername', 'ownerAvatar',
+        'title', 'description', 'visibility', 'trackIds', 'coverUrl', 'createdAt', 'updatedAt'
+      ])
+      && isValidId(data.playlistId)
+      && isValidId(data.ownerId)
+      && data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 80
+      && data.ownerUsername is string && data.ownerUsername.size() >= 1 && data.ownerUsername.size() <= 40
+      && data.ownerAvatar is string && data.ownerAvatar.size() <= 2000
+      && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+      && data.description is string && data.description.size() <= 1000
+      && data.visibility is string && data.visibility.size() <= 20 && data.visibility in ['public', 'private']
+      && data.trackIds is list && data.trackIds.size() <= 500
+      && data.coverUrl is string && data.coverUrl.size() <= 1000000
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
     // =========================================================================
     // 3. COLLECTION RULES
     // =========================================================================
@@ -1298,6 +1368,101 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'title', 'description', 'visibility', 'videoIds', 'coverUrl', 'updatedAt'
+        ]);
+
+      allow delete: if isVerified()
+        && isValidId(playlistId)
+        && isOwner(existing().ownerId);
+    }
+
+    match /mender_music_tracks/{trackId} {
+      allow get: if isSignedIn()
+        && isValidId(trackId)
+        && (existing().visibility == 'public' || isOwner(existing().uploaderId));
+
+      allow list: if isSignedIn()
+        && (existing().visibility == 'public' || isOwner(existing().uploaderId));
+
+      allow create: if isVerified()
+        && isValidId(trackId)
+        && isValidMenderMusicTrack(incoming())
+        && incoming().trackId == trackId
+        && isOwner(incoming().uploaderId)
+        && incoming().playsCount == 0
+        && incoming().likesCount == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(trackId)
+        && isValidMenderMusicTrack(incoming())
+        && incoming().trackId == existing().trackId
+        && incoming().uploaderId == existing().uploaderId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (isOwner(existing().uploaderId) && incoming().diff(existing()).affectedKeys().hasOnly([
+            'title', 'artist', 'artistId', 'albumTitle', 'albumId', 'genre',
+            'releaseYear', 'coverUrl', 'visibility', 'lyrics', 'updatedAt'
+          ]))
+          ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['playsCount', 'updatedAt'])
+          ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'updatedAt'])
+        );
+
+      allow delete: if isVerified()
+        && isValidId(trackId)
+        && isOwner(existing().uploaderId);
+
+      match /likes/{likeUserId} {
+        allow get: if isSignedIn() && isValidId(trackId) && isValidId(likeUserId);
+        allow list: if isSignedIn() && existing().trackId == trackId && isOwner(existing().userId);
+
+        allow create: if isVerified()
+          && isValidId(trackId)
+          && isValidId(likeUserId)
+          && isOwner(likeUserId)
+          && isValidMenderMusicLike(incoming())
+          && incoming().trackId == trackId
+          && incoming().userId == likeUserId
+          && incoming().createdAt == request.time;
+
+        allow update: if false;
+
+        allow delete: if isVerified()
+          && isValidId(trackId)
+          && isValidId(likeUserId)
+          && isOwner(likeUserId);
+      }
+    }
+
+    match /mender_music_playlists/{playlistId} {
+      allow get: if isSignedIn()
+        && isValidId(playlistId)
+        && (existing().visibility == 'public' || isOwner(existing().ownerId));
+
+      allow list: if isSignedIn()
+        && (existing().visibility == 'public' || isOwner(existing().ownerId));
+
+      allow create: if isVerified()
+        && isValidId(playlistId)
+        && isValidMenderMusicPlaylist(incoming())
+        && incoming().playlistId == playlistId
+        && isOwner(incoming().ownerId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerified()
+        && isValidId(playlistId)
+        && isOwner(existing().ownerId)
+        && isValidMenderMusicPlaylist(incoming())
+        && incoming().playlistId == existing().playlistId
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'description', 'visibility', 'trackIds', 'coverUrl', 'updatedAt'
         ]);
 
       allow delete: if isVerified()
