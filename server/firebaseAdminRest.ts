@@ -176,16 +176,28 @@ export function resolveServiceAccount(env: ServerEnv): ServiceAccountCredentials
     const jsonStr = rawJsonEnv.startsWith('{')
       ? rawJsonEnv
       : textDecoder.decode(base64UrlToBytes(rawJsonEnv));
-    let parsed: Partial<ServiceAccountCredentials>;
+    let parsed: Partial<ServiceAccountCredentials> | null = null;
     try {
       parsed = JSON.parse(jsonStr) as Partial<ServiceAccountCredentials>;
     } catch {
-      throw new Error(
-        'INVALID_FIREBASE_SERVICE_ACCOUNT_JSON: проверьте формат FIREBASE_SERVICE_ACCOUNT_JSON (должен быть валидный JSON или Base64 из Firebase Console).'
-      );
+      try {
+        // Fallback if a pasted multiline JSON had literal newlines inside string values
+        const repaired = jsonStr.replace(
+          /"private_key"\s*:\s*"([\s\S]*?)"\s*(,|\})/m,
+          (_m, keyBody: string, tail: string) =>
+            `"private_key": "${keyBody.replace(/\r?\n/g, '\\n')}"${tail}`
+        );
+        parsed = JSON.parse(repaired) as Partial<ServiceAccountCredentials>;
+      } catch {
+        throw new Error(
+          'INVALID_FIREBASE_SERVICE_ACCOUNT_JSON: проверьте формат FIREBASE_SERVICE_ACCOUNT_JSON (должен быть валидный JSON-файл сервисного аккаунта из Firebase Console).'
+        );
+      }
     }
-    if (!parsed.client_email || !parsed.private_key) {
-      throw new Error('FIREBASE_SERVICE_ACCOUNT_JSON missing client_email or private_key');
+    if (!parsed?.client_email || !parsed?.private_key) {
+      throw new Error(
+        'INVALID_FIREBASE_SERVICE_ACCOUNT_JSON: в JSON отсутствуют поля client_email или private_key.'
+      );
     }
     return {
       project_id:
@@ -205,6 +217,17 @@ export function resolveServiceAccount(env: ServerEnv): ServiceAccountCredentials
       client_email: clientEmail,
       private_key: privateKey.replace(/\\n/g, '\n'),
     };
+  }
+
+  if (clientEmail && !privateKey) {
+    throw new Error(
+      'SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED: задан FIREBASE_CLIENT_EMAIL, но не задан FIREBASE_PRIVATE_KEY.'
+    );
+  }
+  if (!clientEmail && privateKey) {
+    throw new Error(
+      'SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED: задан FIREBASE_PRIVATE_KEY, но не задан FIREBASE_CLIENT_EMAIL.'
+    );
   }
 
   throw new Error(

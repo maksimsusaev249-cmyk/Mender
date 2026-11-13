@@ -12,12 +12,14 @@ import {
 import {
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
   collection,
   query,
   where,
+  limit,
   onSnapshot,
   serverTimestamp,
   writeBatch,
@@ -30,6 +32,7 @@ import {
   verifyPinHash,
   hashPassword,
   verifyPasswordHash,
+  deriveUidFromEmail,
   sanitizeId,
 } from '../utils/crypto';
 import { uploadMediaFile } from '../utils/media';
@@ -555,6 +558,136 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * Если у пользователя включён 2FA PIN-код (twoFactorEnabled && pinHash),
    * после успешной проверки пароля открывается второй шаг — подтверждение 2FA PIN-кодом.
    */
+  const toLatinUsernameSlug = (val: string): string => {
+    const cyrillicMap: Record<string, string> = {
+      а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh',
+      з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o',
+      п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts',
+      ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
+    };
+    return val
+      .trim()
+      .toLowerCase()
+      .replace(/^@/, '')
+      .split('')
+      .map(ch => cyrillicMap[ch] ?? ch)
+      .join('')
+      .replace(/[^a-z0-9_]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  };
+
+  const shouldUseDirectFirestoreFallback = (
+    status: number,
+    parsed: Record<string, any> | null
+  ): boolean => {
+    if (!parsed) return true;
+    const errStr = typeof parsed.error === 'string' ? parsed.error : '';
+    if (
+      status === 503 ||
+      status === 502 ||
+      status === 504 ||
+      errStr.includes('SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED') ||
+      errStr.includes('INVALID_FIREBASE_SERVICE_ACCOUNT_JSON') ||
+      errStr.includes('OAuth2 token exchange failed')
+    ) {
+      return true;
+    }
+    if (status === 404 && !errStr.includes('не найден')) {
+      return true;
+    }
+    return false;
+  };
+
+  const findAccountByIdentifierClient = async (
+    rawIdentifier: string
+  ): Promise<{
+    uid: string;
+    normalizedEmail: string;
+    pubDoc: UserPublic | null;
+    privDoc: UserPrivate | null;
+  }> => {
+    const lowered = rawIdentifier.trim().toLowerCase();
+    const isEmailFormat = lowered.includes('@') && !lowered.startsWith('@');
+    const normalizedEmail = isEmailFormat
+      ? lowered
+      : `${lowered.replace(/^@/, '')}@mender.app`;
+
+    let uid = await deriveUidFromEmail(normalizedEmail);
+    let [pubSnap, privSnap] = await Promise.all([
+      getDoc(doc(db, 'users', uid)),
+      getDoc(doc(db, 'users_private', uid)),
+    ]);
+
+    let pubDoc = pubSnap.exists() ? (pubSnap.data() as UserPublic) : null;
+    let privDoc = privSnap.exists() ? (privSnap.data() as UserPrivate) : null;
+
+    if (!pubDoc) {
+      const cleanUname = lowered.replace(/^@/, '').trim();
+      const slugUname = toLatinUsernameSlug(cleanUname);
+      const usersSnap = await getDocs(
+        query(
+          collection(db, 'users'),
+          where('status', 'in', ['online', 'offline', 'busy']),
+          limit(300)
+        )
+      );
+      const allUsers = usersSnap.docs.map(d => d.data() as UserPublic);
+      const matched =
+        allUsers.find(
+          u =>
+            u.username &&
+            (u.username.toLowerCase() === cleanUname ||
+              (slugUname && u.username.toLowerCase() === slugUname))
+        ) ||
+        allUsers.find(u => u.displayName && u.displayName.trim().toLowerCase() === lowered) ||
+        allUsers.find(
+          u =>
+            cleanUname.length >= 2 &&
+            u.displayName &&
+            u.displayName.trim().toLowerCase().includes(lowered)
+        ) ||
+        null;
+
+      if (matched?.uid) {
+        uid = matched.uid;
+        const [mPub, mPriv] = await Promise.all([
+          getDoc(doc(db, 'users', uid)),
+          getDoc(doc(db, 'users_private', uid)),
+        ]);
+        pubDoc = mPub.exists() ? (mPub.data() as UserPublic) : matched;
+        privDoc = mPriv.exists() ? (mPriv.data() as UserPrivate) : null;
+      }
+    }
+
+    return { uid, normalizedEmail, pubDoc, privDoc };
+  };
+
+  const persistDirectSessionUser = (sessionUser: SessionUser, requires2FaPin: boolean) => {
+    try {
+      localStorage.setItem(EMAIL_SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
+    } catch {
+      // ignore storage errors
+    }
+    if (requires2FaPin) {
+      setIsPinVerified(false);
+      sessionStorage.removeItem(getPinVerifiedStorageKey(sessionUser.uid));
+    } else {
+      setIsPinVerified(true);
+      sessionStorage.setItem(getPinVerifiedStorageKey(sessionUser.uid), 'true');
+    }
+    setFirebaseUser(sessionUser);
+  };
+
+  /**
+   * Вход в существующий аккаунт по:
+   * - @юзернейму (например: @maksim или maksim)
+   * - имени пользователя (например: Максим)
+   * - электронной почте (например: user@mail.ru)
+   * и обычному паролю (PBKDF2).
+   * Если у пользователя включён 2FA PIN-код (twoFactorEnabled && pinHash),
+   * после успешной проверки пароля открывается второй шаг — подтверждение 2FA PIN-кодом.
+   */
   const loginWithEmailAccount = async (rawIdentifier: string, rawPassword: string) => {
     setAuthError(null);
     const trimmed = rawIdentifier.trim();
@@ -580,108 +713,157 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error(msg);
     }
 
-    const parseAuthApiResponse = async (res: Response, fallbackMsg: string) => {
-      const text = await res.text();
-      let parsed: Record<string, any> | null = null;
+    const recordInvalidPasswordAttempt = (): never => {
+      const prevAttempts = Number(localStorage.getItem(getPinAttemptsStorageKey(attemptScope)) || '0');
+      const nextAttempts = prevAttempts + 1;
+      localStorage.setItem(getPinAttemptsStorageKey(attemptScope), String(nextAttempts));
+      setFailedPinAttempts(nextAttempts);
+
+      if (nextAttempts >= MAX_PIN_ATTEMPTS) {
+        const resetMsg =
+          'Вы не вспомнили пароль за 5 попыток. Введите новый пароль и подтвердите его.';
+        setAuthError(resetMsg);
+        throw new Error('MAX_PASSWORD_ATTEMPTS_REACHED');
+      }
+
+      const left = Math.max(0, MAX_PIN_ATTEMPTS - nextAttempts);
+      const errMsg = `Неверный пароль! Осталось попыток: ${left} из ${MAX_PIN_ATTEMPTS}.`;
+      setAuthError(errMsg);
+      throw new Error(errMsg);
+    };
+
+    let useDirectFallback = false;
+    let responseStatus = 0;
+    let parsed: Record<string, any> | null = null;
+
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: trimmed, password: rawPassword }),
+      });
+      responseStatus = response.status;
+      const text = await response.text();
       try {
         parsed = text ? (JSON.parse(text) as Record<string, any>) : null;
       } catch {
         parsed = null;
       }
-      if (!parsed) {
-        return {
-          error: `Сервер авторизации не отвечает корректно (HTTP ${res.status}). Проверьте, что работают серверные функции (/api/*) и добавлен FIREBASE_SERVICE_ACCOUNT_JSON.`,
-        };
+      if (shouldUseDirectFirestoreFallback(responseStatus, parsed)) {
+        useDirectFallback = true;
       }
-      if (
-        typeof parsed.error === 'string' &&
-        parsed.error.includes('SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED')
-      ) {
-        return {
-          ...parsed,
-          error:
-            'На сервере не настроен ключ Firebase Admin (FIREBASE_SERVICE_ACCOUNT_JSON или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY). Добавьте переменную окружения и перезапустите сервер.',
-        };
-      }
-      if (!res.ok && !parsed.error) {
-        return { ...parsed, error: `${fallbackMsg} (HTTP ${res.status})` };
-      }
-      return parsed;
-    };
+    } catch {
+      useDirectFallback = true;
+    }
 
-    const signInCustomTokenSafe = async (customToken: string) => {
-      try {
-        return await signInWithCustomToken(auth, customToken);
-      } catch (err: any) {
-        const code = err?.code || '';
-        const msg =
-          code === 'auth/invalid-custom-token'
-            ? 'Недействительный токен Firebase Custom Auth: проверьте, что Service Account JSON взят из проекта optical-quill-dcf5x.'
-            : err?.message || 'Не удалось завершить вход через Firebase Auth';
+    if (!useDirectFallback && parsed) {
+      const data = parsed as {
+        error?: string;
+        code?: string;
+        customToken?: string;
+        uid?: string;
+        requires2FaPin?: boolean;
+      };
+
+      if (responseStatus < 200 || responseStatus >= 300 || !data.customToken || !data.uid) {
+        if (data.code === 'INVALID_PASSWORD') {
+          recordInvalidPasswordAttempt();
+        }
+        const msg = data.error || 'Не удалось выполнить вход';
         setAuthError(msg);
         throw new Error(msg);
       }
-    };
 
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: trimmed, password: rawPassword }),
-    });
-    const data = (await parseAuthApiResponse(response, 'Не удалось выполнить вход')) as {
-      error?: string;
-      code?: string;
-      customToken?: string;
-      uid?: string;
-      requires2FaPin?: boolean;
-    };
+      localStorage.setItem(getPinAttemptsStorageKey(attemptScope), '0');
+      localStorage.removeItem(getPinLockoutStorageKey(attemptScope));
+      localStorage.setItem(getPinAttemptsStorageKey(data.uid), '0');
+      localStorage.removeItem(getPinLockoutStorageKey(data.uid));
+      setFailedPinAttempts(0);
 
-    if (!response.ok || !data.customToken || !data.uid) {
-      if (data.code === 'INVALID_PASSWORD') {
-        const prevAttempts = Number(localStorage.getItem(getPinAttemptsStorageKey(attemptScope)) || '0');
-        const nextAttempts = prevAttempts + 1;
-        localStorage.setItem(getPinAttemptsStorageKey(attemptScope), String(nextAttempts));
-        setFailedPinAttempts(nextAttempts);
-
-        if (nextAttempts >= MAX_PIN_ATTEMPTS) {
-          const resetMsg =
-            'Вы не вспомнили пароль за 5 попыток. Введите новый пароль и подтвердите его.';
-          setAuthError(resetMsg);
-          throw new Error('MAX_PASSWORD_ATTEMPTS_REACHED');
-        }
-
-        const left = Math.max(0, MAX_PIN_ATTEMPTS - nextAttempts);
-        const errMsg = `Неверный пароль! Осталось попыток: ${left} из ${MAX_PIN_ATTEMPTS}.`;
-        setAuthError(errMsg);
-        throw new Error(errMsg);
+      if (data.requires2FaPin) {
+        setIsPinVerified(false);
+        sessionStorage.removeItem(getPinVerifiedStorageKey(data.uid));
+      } else {
+        setIsPinVerified(true);
+        sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
       }
 
-      const msg = data.error || 'Не удалось выполнить вход';
+      const cred = await signInWithCustomToken(auth, data.customToken);
+      setFirebaseUser(cred.user);
+      sendSystemLoginSecurityNotification(data.uid).catch(() => {});
+      return;
+    }
+
+    // Direct Firestore PBKDF2 fallback when Server Service Account key is not provisioned
+    const { uid, normalizedEmail, pubDoc, privDoc } = await findAccountByIdentifierClient(trimmed);
+    if (!pubDoc) {
+      const msg =
+        'Аккаунт с таким @юзернеймом, именем или почтой не найден! Нажмите «Регистрация», чтобы создать аккаунт.';
       setAuthError(msg);
       throw new Error(msg);
     }
 
-    localStorage.setItem(getPinAttemptsStorageKey(attemptScope), '0');
-    localStorage.removeItem(getPinLockoutStorageKey(attemptScope));
-    localStorage.setItem(getPinAttemptsStorageKey(data.uid), '0');
-    localStorage.removeItem(getPinLockoutStorageKey(data.uid));
-    setFailedPinAttempts(0);
-
-    if (data.requires2FaPin) {
-      setIsPinVerified(false);
-      sessionStorage.removeItem(getPinVerifiedStorageKey(data.uid));
-    } else {
-      setIsPinVerified(true);
-      sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
+    if (privDoc?.passwordHash && privDoc?.passwordSalt) {
+      const valid = await verifyPasswordHash(
+        rawPassword,
+        String(privDoc.passwordSalt),
+        String(privDoc.passwordHash)
+      );
+      if (!valid) {
+        recordInvalidPasswordAttempt();
+      }
+    } else if (privDoc?.pinHash && privDoc?.pinSalt) {
+      const digitsOnly = rawPassword.replace(/\D/g, '');
+      const matchesLegacyPin =
+        digitsOnly.length >= 4 &&
+        (await verifyPinHash(digitsOnly, String(privDoc.pinSalt), String(privDoc.pinHash)));
+      if (!matchesLegacyPin) {
+        recordInvalidPasswordAttempt();
+      }
+      const pwdSalt = generateSalt(16);
+      const pwdHash = await hashPassword(rawPassword, pwdSalt);
+      await updateDoc(doc(db, 'users_private', uid), {
+        passwordHash: pwdHash,
+        passwordSalt: pwdSalt,
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+    } else if (privDoc && rawPassword.length >= 6) {
+      const pwdSalt = generateSalt(16);
+      const pwdHash = await hashPassword(rawPassword, pwdSalt);
+      await updateDoc(doc(db, 'users_private', uid), {
+        passwordHash: pwdHash,
+        passwordSalt: pwdSalt,
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
     }
 
-    const cred = await signInCustomTokenSafe(data.customToken);
-    setFirebaseUser(cred.user);
-    sendSystemLoginSecurityNotification(data.uid).catch(() => {});
+    localStorage.setItem(getPinAttemptsStorageKey(attemptScope), '0');
+    localStorage.removeItem(getPinLockoutStorageKey(attemptScope));
+    localStorage.setItem(getPinAttemptsStorageKey(uid), '0');
+    localStorage.removeItem(getPinLockoutStorageKey(uid));
+    setFailedPinAttempts(0);
+
+    await updateDoc(doc(db, 'users', uid), {
+      status: 'online',
+      updatedAt: serverTimestamp(),
+    }).catch(() => {});
+
+    const requires2FaPin = Boolean(privDoc?.pinHash && privDoc?.twoFactorEnabled);
+    persistDirectSessionUser(
+      {
+        uid,
+        email: privDoc?.email || normalizedEmail,
+        displayName: pubDoc.displayName,
+        photoURL: pubDoc.avatarUrl,
+        phoneNumber: privDoc?.phone || null,
+      },
+      requires2FaPin
+    );
+    sendSystemLoginSecurityNotification(uid).catch(() => {});
   };
 
   /**
-   * Регистрация нового аккаунта через доверенный сервер (Firebase Custom Token)
+   * Регистрация нового аккаунта (Server Firebase Custom Token + автоматический прямой режим Firestore PBKDF2)
    */
   const registerWithEmailAccount = async (params: {
     email: string;
@@ -691,58 +873,191 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     pin2FA?: string;
   }) => {
     setAuthError(null);
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-    const rawText = await response.text();
+
+    let useDirectFallback = false;
+    let responseStatus = 0;
     let parsed: Record<string, any> | null = null;
+
     try {
-      parsed = rawText ? (JSON.parse(rawText) as Record<string, any>) : null;
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      responseStatus = response.status;
+      const rawText = await response.text();
+      try {
+        parsed = rawText ? (JSON.parse(rawText) as Record<string, any>) : null;
+      } catch {
+        parsed = null;
+      }
+      if (shouldUseDirectFirestoreFallback(responseStatus, parsed)) {
+        useDirectFallback = true;
+      }
     } catch {
-      parsed = null;
+      useDirectFallback = true;
     }
 
-    const data = (parsed || {}) as {
-      error?: string;
-      customToken?: string;
-      uid?: string;
-    };
+    if (!useDirectFallback && parsed) {
+      const data = parsed as {
+        error?: string;
+        customToken?: string;
+        uid?: string;
+      };
 
-    if (!parsed) {
-      const msg = `Сервер регистрации (/api/auth/register) вернул неверный ответ (HTTP ${response.status}). Убедитесь, что работают серверные функции (/api/*) и настроен FIREBASE_SERVICE_ACCOUNT_JSON.`;
-      setAuthError(msg);
-      throw new Error(msg);
-    }
+      if (responseStatus < 200 || responseStatus >= 300 || !data.customToken || !data.uid) {
+        const msg = data.error || `Ошибка регистрации аккаунта (HTTP ${responseStatus})`;
+        setAuthError(msg);
+        throw new Error(msg);
+      }
 
-    if (!response.ok || !data.customToken || !data.uid) {
-      const rawError = data.error || `Ошибка регистрации аккаунта (HTTP ${response.status})`;
-      const msg = rawError.includes('SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED')
-        ? 'На сервере не настроен ключ Firebase Admin (FIREBASE_SERVICE_ACCOUNT_JSON или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY). Добавьте переменную окружения и перезапустите сервер.'
-        : rawError;
-      setAuthError(msg);
-      throw new Error(msg);
-    }
-
-    setIsPinVerified(true);
-    sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
-    try {
+      setIsPinVerified(true);
+      sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
       const cred = await signInWithCustomToken(auth, data.customToken);
       setFirebaseUser(cred.user);
-    } catch (err: any) {
-      const code = err?.code || '';
-      const msg =
-        code === 'auth/invalid-custom-token'
-          ? 'Недействительный токен Firebase Custom Auth: проверьте, что Service Account JSON взят из проекта optical-quill-dcf5x.'
-          : err?.message || 'Ошибка входа после регистрации аккаунта';
+      return;
+    }
+
+    // Direct Firestore PBKDF2 registration when Server Service Account key is not configured
+    const cleanName = String(params.displayName || '').trim();
+    const trimmedEmail = String(params.email || '').trim().toLowerCase();
+    const rawUsernameInput = toLatinUsernameSlug(String(params.username || ''));
+    const password = String(params.password || '');
+    const cleanPin = String(params.pin2FA || '').replace(/\D/g, '');
+
+    if (!cleanName) {
+      const msg = 'Введите ваше имя';
       setAuthError(msg);
       throw new Error(msg);
+    }
+
+    const fallbackPrefix = trimmedEmail
+      ? toLatinUsernameSlug(trimmedEmail.split('@')[0] || '')
+      : toLatinUsernameSlug(cleanName) || `user_${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const baseUsername =
+      rawUsernameInput || fallbackPrefix || `user_${Math.floor(1000 + Math.random() * 9000)}`;
+    const cleanUsername = (baseUsername.length >= 3 ? baseUsername : `user_${baseUsername}`).slice(
+      0,
+      40
+    );
+
+    if (!password || password.length < 6) {
+      const msg = 'Пароль должен содержать минимум 6 символов (буквы, цифры или спецсимволы)';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    if (cleanPin) {
+      if (cleanPin.length < 4 || cleanPin.length > 8) {
+        const msg = '2FA PIN-код должен содержать от 4 до 8 цифр (или оставьте поле пустым)';
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+      if (/^(\d)\1+$/.test(cleanPin) || cleanPin === '1234' || cleanPin === '123456') {
+        const msg = 'Слабый 2FA PIN-код! Не используйте одинаковые цифры (0000, 1111) или 1234.';
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+    }
+
+    const normalizedEmail = trimmedEmail
+      ? trimmedEmail.includes('@')
+        ? trimmedEmail
+        : `${trimmedEmail}@mender.app`
+      : `${cleanUsername}@mender.app`;
+
+    const uid = await deriveUidFromEmail(normalizedEmail);
+
+    try {
+      const existingPub = await getDoc(doc(db, 'users', uid));
+      if (existingPub.exists()) {
+        const msg = 'Такой аккаунт уже зарегистрирован! Нажмите «Войти» и введите свой пароль.';
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+
+      const activeUsersSnap = await getDocs(
+        query(
+          collection(db, 'users'),
+          where('status', 'in', ['online', 'offline', 'busy']),
+          limit(300)
+        )
+      );
+      const dupUsername = activeUsersSnap.docs.some(
+        d => String((d.data() as UserPublic).username || '').toLowerCase() === cleanUsername
+      );
+      if (dupUsername) {
+        const msg = `Юзернейм @${cleanUsername} уже занят. Выберите другой @username или войдите в существующий аккаунт.`;
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+
+      const defaultAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+        cleanName
+      )}&background=0077FF&color=fff&bold=true`;
+
+      const passwordSalt = generateSalt(16);
+      const passwordHash = await hashPassword(password, passwordSalt);
+      const pinSalt = cleanPin ? generateSalt(16) : '';
+      const pinHash = cleanPin ? await hashPin(cleanPin, pinSalt) : '';
+
+      const publicDoc: UserPublic = {
+        uid,
+        displayName: cleanName.slice(0, 80),
+        username: cleanUsername,
+        avatarUrl: defaultAvatar,
+        bio: 'Привет! Я на связи в Mender.',
+        status: 'online',
+        privacyLastSeen: 'everyone',
+        privacyPhoto: 'everyone',
+        privacyCalls: 'everyone',
+        followersCount: 0,
+        followingCount: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      const privateDoc: UserPrivate = {
+        uid,
+        email: normalizedEmail.slice(0, 254),
+        phone: '',
+        pinHash,
+        pinSalt,
+        passwordHash,
+        passwordSalt,
+        darkMode: false,
+        notificationsEnabled: true,
+        soundEnabled: true,
+        twoFactorEnabled: Boolean(pinHash),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'users', uid), publicDoc);
+      batch.set(doc(db, 'users_private', uid), privateDoc);
+      await batch.commit();
+
+      persistDirectSessionUser(
+        {
+          uid,
+          email: normalizedEmail,
+          displayName: publicDoc.displayName,
+          photoURL: publicDoc.avatarUrl,
+          phoneNumber: null,
+        },
+        false
+      );
+    } catch (err: any) {
+      const msg = err?.message || 'Ошибка регистрации аккаунта';
+      setAuthError(msg);
+      throw err;
     }
   };
 
   /**
-   * Быстрый вход по почте через доверенный сервер (Firebase Custom Token):
+   * Быстрый вход по почте:
    * запрещает обход аккаунтов, защищённых паролем или PIN-кодом.
    */
   const loginWithQuickEmail = async (
@@ -752,48 +1067,147 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ) => {
     setAuthError(null);
     try {
-      const response = await fetch('/api/auth/quick-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: rawEmail,
-          displayName: customDisplayName,
-          pin: providedPin,
-        }),
-      });
-      const rawText = await response.text();
+      let useDirectFallback = false;
+      let responseStatus = 0;
       let parsed: Record<string, any> | null = null;
+
       try {
-        parsed = rawText ? (JSON.parse(rawText) as Record<string, any>) : null;
+        const response = await fetch('/api/auth/quick-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: rawEmail,
+            displayName: customDisplayName,
+            pin: providedPin,
+          }),
+        });
+        responseStatus = response.status;
+        const rawText = await response.text();
+        try {
+          parsed = rawText ? (JSON.parse(rawText) as Record<string, any>) : null;
+        } catch {
+          parsed = null;
+        }
+        if (shouldUseDirectFirestoreFallback(responseStatus, parsed)) {
+          useDirectFallback = true;
+        }
       } catch {
-        parsed = null;
+        useDirectFallback = true;
       }
 
-      if (!parsed) {
-        const msg = `Сервер авторизации (/api/auth/quick-email) не отвечает JSON (HTTP ${response.status}). Проверьте серверные функции и FIREBASE_SERVICE_ACCOUNT_JSON.`;
-        setAuthError(msg);
-        throw new Error(msg);
+      if (!useDirectFallback && parsed) {
+        const data = parsed as {
+          error?: string;
+          customToken?: string;
+          uid?: string;
+        };
+
+        if (responseStatus < 200 || responseStatus >= 300 || !data.customToken || !data.uid) {
+          const msg = data.error || `Не удалось выполнить вход по почте (HTTP ${responseStatus})`;
+          setAuthError(msg);
+          throw new Error(msg);
+        }
+
+        setIsPinVerified(true);
+        sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
+        const cred = await signInWithCustomToken(auth, data.customToken);
+        setFirebaseUser(cred.user);
+        return;
       }
 
-      const data = parsed as {
-        error?: string;
-        customToken?: string;
-        uid?: string;
-      };
-
-      if (!response.ok || !data.customToken || !data.uid) {
-        const rawError = data.error || `Не удалось выполнить вход по почте (HTTP ${response.status})`;
-        const msg = rawError.includes('SERVER_FIREBASE_CREDENTIALS_NOT_CONFIGURED')
-          ? 'На сервере не настроен ключ Firebase Admin (FIREBASE_SERVICE_ACCOUNT_JSON или FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY).'
-          : rawError;
-        setAuthError(msg);
-        throw new Error(msg);
+      const trimmed = String(rawEmail || '').trim().toLowerCase();
+      if (!trimmed) {
+        throw new Error('Введите адрес электронной почты');
+      }
+      const cleanPin = providedPin ? providedPin.replace(/\D/g, '') : '';
+      if (cleanPin && (cleanPin.length < 4 || cleanPin.length > 8)) {
+        throw new Error('Защитный PIN-код должен содержать от 4 до 8 цифр');
       }
 
-      setIsPinVerified(true);
-      sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
-      const cred = await signInWithCustomToken(auth, data.customToken);
-      setFirebaseUser(cred.user);
+      const normalizedEmail = trimmed.includes('@') ? trimmed : `${trimmed}@mender.app`;
+      const uid = await deriveUidFromEmail(normalizedEmail);
+      const [pubSnap, privSnap] = await Promise.all([
+        getDoc(doc(db, 'users', uid)),
+        getDoc(doc(db, 'users_private', uid)),
+      ]);
+      const existingPub = pubSnap.exists() ? (pubSnap.data() as UserPublic) : null;
+      const existingPriv = privSnap.exists() ? (privSnap.data() as UserPrivate) : null;
+
+      if (existingPriv?.passwordHash) {
+        throw new Error('Этот аккаунт защищён паролем. Используйте стандартный вход с паролем.');
+      }
+      if (existingPriv?.pinHash && existingPriv?.pinSalt) {
+        if (!cleanPin) {
+          throw new Error('Для входа в этот аккаунт необходимо ввести защитный PIN-код.');
+        }
+        const pinOk = await verifyPinHash(cleanPin, existingPriv.pinSalt, existingPriv.pinHash);
+        if (!pinOk) {
+          throw new Error('Неверный защитный PIN-код для этого аккаунта!');
+        }
+      }
+
+      const emailPrefix = normalizedEmail.split('@')[0] || 'user';
+      const rawUsername = toLatinUsernameSlug(emailPrefix);
+      const cleanUsername = (rawUsername.length >= 3 ? rawUsername : `user_${rawUsername}`).slice(
+        0,
+        40
+      );
+      const resolvedName = (customDisplayName?.trim() || emailPrefix).slice(0, 80);
+      const defaultAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+        resolvedName
+      )}&background=4f46e5&color=fff&bold=true`;
+
+      if (!existingPub) {
+        await setDoc(doc(db, 'users', uid), {
+          uid,
+          displayName: resolvedName,
+          username: cleanUsername,
+          avatarUrl: defaultAvatar,
+          bio: 'Привет! Я на связи в Mender.',
+          status: 'online',
+          privacyLastSeen: 'everyone',
+          privacyPhoto: 'everyone',
+          privacyCalls: 'everyone',
+          followersCount: 0,
+          followingCount: 0,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await updateDoc(doc(db, 'users', uid), {
+          status: 'online',
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      if (!existingPriv) {
+        const newSalt = cleanPin ? generateSalt(16) : '';
+        const newHash = cleanPin ? await hashPin(cleanPin, newSalt) : '';
+        await setDoc(doc(db, 'users_private', uid), {
+          uid,
+          email: normalizedEmail.slice(0, 254),
+          phone: '',
+          pinHash: newHash,
+          pinSalt: newSalt,
+          darkMode: true,
+          notificationsEnabled: true,
+          soundEnabled: true,
+          twoFactorEnabled: Boolean(newHash),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      persistDirectSessionUser(
+        {
+          uid,
+          email: normalizedEmail,
+          displayName: existingPub?.displayName || resolvedName,
+          photoURL: existingPub?.avatarUrl || defaultAvatar,
+          phoneNumber: existingPriv?.phone || null,
+        },
+        false
+      );
     } catch (err: any) {
       setAuthError(err?.message || 'Не удалось выполнить вход по почте');
       throw err;
@@ -1097,13 +1511,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error(msg);
     }
 
-    const response = await fetch('/api/auth/recovery/challenge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier: trimmed }),
-    });
-    const data = (await response.json().catch(() => ({}))) as {
+    let response: Response | null = null;
+    let data: {
       error?: string;
+      code?: string;
       uid?: string;
       maskedHint?: string;
       requires2FaPin?: boolean;
@@ -1111,24 +1522,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       otpCode?: string;
       expiresAt?: number;
       challengeToken?: string;
-    };
+    } = {};
 
-    if (!response.ok || !data.uid || !data.challengeToken || !data.otpCode || !data.expiresAt) {
-      const msg = data.error || 'Аккаунт с таким @юзернеймом, именем или почтой не найден!';
+    try {
+      response = await fetch('/api/auth/recovery/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: trimmed }),
+      });
+      data = await response.json().catch(() => ({}));
+    } catch {
+      response = null;
+    }
+
+    if (!shouldUseDirectFirestoreFallback(response ? response.status : 503, data)) {
+      if (!response || !response.ok || !data.uid || !data.challengeToken || !data.otpCode || !data.expiresAt) {
+        const msg = data.error || 'Аккаунт с таким @юзернеймом, именем или почтой не найден!';
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+
+      recoveryChallengeTokensRef.current.set(trimmed.toLowerCase(), data.challengeToken);
+      recoveryChallengeTokensRef.current.set(data.uid, data.challengeToken);
+
+      return {
+        uid: data.uid,
+        maskedHint: data.maskedHint || '@user',
+        requires2FaPin: Boolean(data.requires2FaPin),
+        requiresEmailOrUsernameCheck: data.requiresEmailOrUsernameCheck || '',
+        otpCode: data.otpCode,
+        expiresAt: data.expiresAt,
+      };
+    }
+
+    // Direct Firestore fallback for Password Recovery Step 1
+    const found = await findAccountByIdentifierClient(trimmed);
+    if (!found.pubDoc || !found.privDoc) {
+      const msg = 'Аккаунт с таким @юзернеймом, именем или почтой не найден!';
       setAuthError(msg);
       throw new Error(msg);
     }
 
-    recoveryChallengeTokensRef.current.set(trimmed.toLowerCase(), data.challengeToken);
-    recoveryChallengeTokensRef.current.set(data.uid, data.challengeToken);
+    const otpArr = new Uint32Array(1);
+    crypto.getRandomValues(otpArr);
+    const otpCode = String(100000 + (otpArr[0] % 900000));
+    const expiresAt = Date.now() + 3 * 60_000;
+
+    await sendSystemLoginSecurityNotification(found.uid, otpCode).catch(() => {});
+
+    const rawUsername = found.pubDoc.username || '';
+    const maskedHint =
+      rawUsername.length > 2
+        ? `@${rawUsername[0]}***${rawUsername.slice(-1)}`
+        : `@${rawUsername || 'user'}`;
+
+    const directToken = JSON.stringify({ uid: found.uid, otpCode, expiresAt });
+    recoveryChallengeTokensRef.current.set(trimmed.toLowerCase(), directToken);
+    recoveryChallengeTokensRef.current.set(found.uid, directToken);
 
     return {
-      uid: data.uid,
-      maskedHint: data.maskedHint || '@user',
-      requires2FaPin: Boolean(data.requires2FaPin),
-      requiresEmailOrUsernameCheck: data.requiresEmailOrUsernameCheck || '',
-      otpCode: data.otpCode,
-      expiresAt: data.expiresAt,
+      uid: found.uid,
+      maskedHint,
+      requires2FaPin: Boolean(found.privDoc.pinHash && found.privDoc.pinSalt),
+      requiresEmailOrUsernameCheck: rawUsername || found.privDoc.email || '',
+      otpCode,
+      expiresAt,
     };
   };
 
@@ -1161,47 +1619,142 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const challengeToken = recoveryChallengeTokensRef.current.get(trimmed.toLowerCase()) || '';
 
-    const response = await fetch('/api/auth/recovery/reset', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        identifier: trimmed,
-        newPassword: params.newPassword,
-        confirmPassword: params.confirmPassword,
-        otpCode: params.otpCode,
-        challengeToken,
-        pin2FA: params.pin2FA,
-        ownerConfirmInput: params.ownerConfirmInput,
-      }),
-    });
-
-    const data = (await response.json().catch(() => ({}))) as {
-      error?: string;
-      customToken?: string;
-      uid?: string;
+    const registerRecoveryFailure = (baseMessage: string): never => {
+      const prev = Number(localStorage.getItem(recoveryAttemptsKey) || '0') + 1;
+      localStorage.setItem(recoveryAttemptsKey, String(prev));
+      if (prev >= 3) {
+        localStorage.setItem(recoveryLockKey, String(Date.now() + 60_000));
+        localStorage.setItem(recoveryAttemptsKey, '0');
+        const lockMsg = `${baseMessage} Превышен лимит (3 попытки) — восстановление заблокировано на 60 секунд.`;
+        setAuthError(lockMsg);
+        throw new Error(lockMsg);
+      }
+      const left = 3 - prev;
+      const errMsg = `${baseMessage} (Осталось попыток проверки: ${left} из 3)`;
+      setAuthError(errMsg);
+      throw new Error(errMsg);
     };
 
-    if (!response.ok || !data.customToken || !data.uid) {
-      if (response.status === 401) {
-        const prev = Number(localStorage.getItem(recoveryAttemptsKey) || '0') + 1;
-        localStorage.setItem(recoveryAttemptsKey, String(prev));
-        if (prev >= 3) {
-          localStorage.setItem(recoveryLockKey, String(Date.now() + 60_000));
-          localStorage.setItem(recoveryAttemptsKey, '0');
-          const lockMsg = `${data.error || 'Ошибка проверки'} Превышен лимит (3 попытки) — восстановление заблокировано на 60 секунд.`;
-          setAuthError(lockMsg);
-          throw new Error(lockMsg);
+    let response: Response | null = null;
+    let data: {
+      error?: string;
+      code?: string;
+      customToken?: string;
+      uid?: string;
+    } = {};
+
+    try {
+      response = await fetch('/api/auth/recovery/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: trimmed,
+          newPassword: params.newPassword,
+          confirmPassword: params.confirmPassword,
+          otpCode: params.otpCode,
+          challengeToken,
+          pin2FA: params.pin2FA,
+          ownerConfirmInput: params.ownerConfirmInput,
+        }),
+      });
+      data = await response.json().catch(() => ({}));
+    } catch {
+      response = null;
+    }
+
+    if (!shouldUseDirectFirestoreFallback(response ? response.status : 503, data)) {
+      if (!response || !response.ok || !data.customToken || !data.uid) {
+        if (response?.status === 401) {
+          registerRecoveryFailure(data.error || 'Ошибка проверки');
         }
-        const left = 3 - prev;
-        const errMsg = `${data.error || 'Ошибка проверки'} (Осталось попыток проверки: ${left} из 3)`;
-        setAuthError(errMsg);
-        throw new Error(errMsg);
+        const msg = data.error || 'Ошибка сброса пароля';
+        setAuthError(msg);
+        throw new Error(msg);
       }
 
-      const msg = data.error || 'Ошибка сброса пароля';
+      recoveryChallengeTokensRef.current.delete(trimmed.toLowerCase());
+      localStorage.setItem(recoveryAttemptsKey, '0');
+      localStorage.removeItem(recoveryLockKey);
+      localStorage.setItem(getPinAttemptsStorageKey(sanitizeId(`id_${trimmed.toLowerCase()}`)), '0');
+      localStorage.removeItem(getPinLockoutStorageKey(sanitizeId(`id_${trimmed.toLowerCase()}`)));
+      setFailedPinAttempts(0);
+
+      setIsPinVerified(true);
+      sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
+      const cred = await signInWithCustomToken(auth, data.customToken);
+      setFirebaseUser(cred.user);
+      return;
+    }
+
+    // Direct Firestore fallback for Password Recovery Step 2
+    if (Date.now() > params.otpExpiresAt) {
+      const msg = 'Срок действия 6-значного кода истёк (3 минуты). Запросите новый код!';
       setAuthError(msg);
       throw new Error(msg);
     }
+
+    if (!params.otpCode || params.otpCode.trim() !== params.expectedOtpCode) {
+      registerRecoveryFailure('Неверный 6-значный защитный код подтверждения!');
+    }
+
+    const found = await findAccountByIdentifierClient(trimmed);
+    if (!found.pubDoc || !found.privDoc) {
+      const msg = 'Аккаунт не найден';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    const { uid, pubDoc: publicDoc, privDoc: privateDoc } = found;
+    const enteredConfirm = (params.ownerConfirmInput || '')
+      .replace(/^@/, '')
+      .trim()
+      .toLowerCase();
+    const expectedUsername = (publicDoc.username || '').toLowerCase();
+    const expectedEmail = (privateDoc.email || '').toLowerCase();
+    if (
+      !enteredConfirm ||
+      (enteredConfirm !== expectedUsername && enteredConfirm !== expectedEmail)
+    ) {
+      registerRecoveryFailure(
+        'Неверное подтверждение вашего точного @username или почты!'
+      );
+    }
+
+    if (privateDoc.pinHash && privateDoc.pinSalt) {
+      const cleanPin = (params.pin2FA || '').replace(/\D/g, '');
+      if (cleanPin.length < 4) {
+        const msg = 'На аккаунте включена 2FA-защита: введите ваш 2FA PIN-код безопасности!';
+        setAuthError(msg);
+        throw new Error(msg);
+      }
+      const pinOk = await verifyPinHash(cleanPin, privateDoc.pinSalt, privateDoc.pinHash);
+      if (!pinOk) {
+        registerRecoveryFailure('Неверный 2FA PIN-код безопасности!');
+      }
+    }
+
+    const strengthError = validateStrongPassword(params.newPassword, publicDoc.username);
+    if (strengthError) {
+      setAuthError(strengthError);
+      throw new Error(strengthError);
+    }
+
+    if (params.newPassword !== params.confirmPassword) {
+      const msg = 'Новый пароль и подтверждение пароля не совпадают!';
+      setAuthError(msg);
+      throw new Error(msg);
+    }
+
+    const passwordSalt = generateSalt(16);
+    const passwordHash = await hashPassword(params.newPassword, passwordSalt);
+
+    await updateDoc(doc(db, 'users_private', uid), {
+      passwordHash,
+      passwordSalt,
+      updatedAt: serverTimestamp(),
+    });
+
+    await sendSystemLoginSecurityNotification(uid);
 
     recoveryChallengeTokensRef.current.delete(trimmed.toLowerCase());
     localStorage.setItem(recoveryAttemptsKey, '0');
@@ -1210,10 +1763,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem(getPinLockoutStorageKey(sanitizeId(`id_${trimmed.toLowerCase()}`)));
     setFailedPinAttempts(0);
 
-    setIsPinVerified(true);
-    sessionStorage.setItem(getPinVerifiedStorageKey(data.uid), 'true');
-    const cred = await signInWithCustomToken(auth, data.customToken);
-    setFirebaseUser(cred.user);
+    persistDirectSessionUser(
+      {
+        uid,
+        email: privateDoc.email || null,
+        displayName: publicDoc.displayName || publicDoc.username || 'Пользователь',
+        photoURL: publicDoc.avatarUrl || null,
+        phoneNumber: privateDoc.phone || null,
+      },
+      true
+    );
   };
 
   /**

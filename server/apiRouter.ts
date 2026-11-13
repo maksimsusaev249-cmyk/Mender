@@ -185,11 +185,13 @@ export async function handleApiRequest(
 
   if (pathname === '/api/health' && request.method === 'GET') {
     let customAuthConfigured = false;
+    let authConfigIssue: string | undefined;
     try {
       resolveServiceAccount(env);
       customAuthConfigured = true;
-    } catch {
+    } catch (err: any) {
       customAuthConfigured = false;
+      authConfigIssue = err?.message || 'FIREBASE_SERVICE_ACCOUNT_JSON not configured';
     }
     const turnConfigured = Boolean(
       (env.CF_TURN_TOKEN_ID && env.CF_TURN_API_TOKEN) ||
@@ -200,6 +202,7 @@ export async function handleApiRequest(
       service: 'mender-api',
       version: '7.5.0',
       customAuthConfigured,
+      ...(authConfigIssue ? { authConfigIssue } : {}),
       turnConfigured,
     });
   }
