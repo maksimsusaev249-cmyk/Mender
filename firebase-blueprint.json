@@ -213,6 +213,9 @@
         "role": { "type": "string", "enum": ["owner", "admin", "moderator", "member"] },
         "isPinned": { "type": "boolean" },
         "isMuted": { "type": "boolean" },
+        "isArchived": { "type": "boolean" },
+        "isHidden": { "type": "boolean" },
+        "clearedAtMs": { "type": "integer" },
         "joinedAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -256,6 +259,19 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "TypingStatus": {
+      "title": "TypingStatus",
+      "description": "Real-time typing indicator status for a participant in a chat.",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "isTyping": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["chatId", "userId", "displayName", "isTyping", "updatedAt"]
     },
     "Post": {
       "title": "Post",
@@ -774,6 +790,10 @@
     "/chats/{chatId}/messages/{messageId}": {
       "schema": "Message",
       "description": "Messages inside a chat."
+    },
+    "/chats/{chatId}/typing/{userId}": {
+      "schema": "TypingStatus",
+      "description": "Real-time typing indicator status inside a chat."
     },
     "/posts/{postId}": {
       "schema": "Post",

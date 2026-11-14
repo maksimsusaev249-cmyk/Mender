@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useChat } from '../../context/ChatContext';
 import { useAuth } from '../../context/AuthContext';
 import { Search, X } from 'lucide-react';
+import { Avatar } from '../common/Avatar';
 
 interface SearchModalProps {
   onClose: () => void;
@@ -35,22 +36,23 @@ export const SearchModal: React.FC<SearchModalProps> = ({ onClose }) => {
   const filteredPosts = posts.filter(p => p.content.toLowerCase().includes(q));
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-start justify-center pt-16 p-4 z-50">
-      <div className="w-full max-w-2xl bg-white border border-[#E1E3E6] rounded-2xl shadow-2xl overflow-hidden text-[#19191A] flex flex-col max-h-[80vh]">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-start justify-center pt-3 sm:pt-16 p-2 sm:p-4 z-50">
+      <div className="w-full max-w-2xl bg-white border border-[#E1E3E6] rounded-2xl shadow-2xl overflow-hidden text-[#19191A] flex flex-col max-h-[90dvh] sm:max-h-[80vh]">
         {/* Search Header Input */}
-        <div className="p-4 border-b border-[#E1E3E6] flex items-center gap-3 bg-white">
+        <div className="p-3.5 sm:p-4 border-b border-[#E1E3E6] flex items-center gap-3 bg-white">
           <Search className="w-5 h-5 text-[#0077FF] shrink-0" />
           <input
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Поиск людей, бесед, сообществ и записей..."
-            className="w-full bg-transparent text-[#19191A] placeholder-[#818C99] focus:outline-none text-sm"
+            className="w-full bg-transparent text-[#19191A] placeholder-[#818C99] focus:outline-none text-[16px] sm:text-sm"
             autoFocus
           />
           <button
+            type="button"
             onClick={onClose}
-            className="text-[#818C99] hover:text-[#19191A] p-1.5 rounded-lg hover:bg-[#EDEFEF] transition-colors cursor-pointer"
+            className="text-[#818C99] hover:text-[#19191A] min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl hover:bg-[#EDEFEF] transition-colors cursor-pointer shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -84,10 +86,10 @@ export const SearchModal: React.FC<SearchModalProps> = ({ onClose }) => {
                           }}
                           className="flex items-center gap-3 cursor-pointer flex-1 min-w-0"
                         >
-                          <img
+                          <Avatar
                             src={foundUser.avatarUrl}
-                            alt={foundUser.displayName}
-                            className="w-10 h-10 rounded-full object-cover border border-[#E1E3E6] shrink-0"
+                            name={foundUser.displayName}
+                            className="w-10 h-10 rounded-full border border-[#E1E3E6] shrink-0"
                           />
                           <div className="min-w-0">
                             <h4 className="text-sm font-semibold text-[#2A5885] truncate">
@@ -106,7 +108,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({ onClose }) => {
                               openUserProfile(foundUser);
                               onClose();
                             }}
-                            className="px-3 py-1.5 rounded-lg bg-[#EDEFEF] hover:bg-[#E2E5E8] text-xs font-semibold text-[#2C3138] cursor-pointer"
+                            className="hidden sm:inline-flex px-3 py-2 rounded-lg bg-[#EDEFEF] hover:bg-[#E2E5E8] text-xs font-semibold text-[#2C3138] cursor-pointer"
                           >
                             Страница
                           </button>
@@ -117,7 +119,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({ onClose }) => {
                               setActiveTab('chats');
                               onClose();
                             }}
-                            className="px-3 py-1.5 rounded-lg bg-[#0077FF] hover:bg-[#0066EA] text-xs font-semibold text-white cursor-pointer"
+                            className="px-3.5 py-2 rounded-xl bg-[#0077FF] hover:bg-[#0066EA] text-xs font-semibold text-white cursor-pointer"
                           >
                             Написать
                           </button>
@@ -145,7 +147,16 @@ export const SearchModal: React.FC<SearchModalProps> = ({ onClose }) => {
                         }}
                         className="flex items-center gap-3 p-2 rounded-xl hover:bg-[#F5F6F8] cursor-pointer transition-colors"
                       >
-                        <img src={chat.avatarUrl} alt={chat.name} className="w-10 h-10 rounded-full object-cover border border-[#E1E3E6]" />
+                        <Avatar
+                          src={chat.avatarUrl}
+                          name={chat.name}
+                          isSystemSecurity={
+                            chat.peerUserId === 'mender_security_bot' ||
+                            chat.chatId.startsWith('chat_system_security_') ||
+                            chat.name === 'Mender Безопасность'
+                          }
+                          className="w-10 h-10 rounded-full border border-[#E1E3E6] shrink-0"
+                        />
                         <div className="flex-1 overflow-hidden">
                           <h4 className="text-sm font-semibold text-[#19191A] truncate">{chat.name}</h4>
                           <p className="text-xs text-[#818C99] truncate">{chat.description || chat.lastMessageText}</p>
@@ -173,7 +184,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({ onClose }) => {
                         className="p-2.5 rounded-xl bg-[#F7F8FA] hover:bg-[#EDEFEF] border border-[#E1E3E6] cursor-pointer transition-colors"
                       >
                         <div className="flex items-center gap-2 mb-1">
-                          <img src={post.authorAvatar} alt={post.authorName} className="w-6 h-6 rounded-full object-cover border border-[#E1E3E6]" />
+                          <Avatar
+                            src={post.authorAvatar}
+                            name={post.authorName}
+                            className="w-6 h-6 rounded-full border border-[#E1E3E6] shrink-0"
+                          />
                           <span className="text-xs font-semibold text-[#2A5885]">{post.authorName}</span>
                         </div>
                         <p className="text-xs text-[#19191A] line-clamp-2">{post.content}</p>

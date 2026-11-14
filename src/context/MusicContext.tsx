@@ -80,6 +80,59 @@ function extractTsMs(ts: any, fallbackId?: string): number {
   return Date.now();
 }
 
+function getTrackSourceKey(track: MenderMusicTrack): string {
+  return `${track.trackId}::${track.audioUrl}`;
+}
+
+function inferImageMimeType(src: string): string {
+  const lower = src.toLowerCase();
+  if (lower.startsWith('data:image/jpeg') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+    return 'image/jpeg';
+  }
+  if (lower.startsWith('data:image/webp') || lower.endsWith('.webp')) {
+    return 'image/webp';
+  }
+  if (lower.startsWith('data:image/svg') || lower.endsWith('.svg')) {
+    return 'image/svg+xml';
+  }
+  return 'image/png';
+}
+
+function toAbsoluteMediaUrl(url: string): string {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('blob:') || /^https?:\/\//i.test(url)) {
+    return url;
+  }
+  try {
+    return new URL(url, window.location.origin).href;
+  } catch {
+    return url;
+  }
+}
+
+function buildMediaArtwork(coverUrl?: string): MediaImage[] {
+  const list: MediaImage[] = [];
+  if (coverUrl) {
+    const absCover = toAbsoluteMediaUrl(coverUrl);
+    if (absCover) {
+      list.push({
+        src: absCover,
+        sizes: '512x512',
+        type: inferImageMimeType(absCover),
+      });
+    }
+  }
+  const fallback512 = toAbsoluteMediaUrl('/pwa-512.png');
+  const fallback192 = toAbsoluteMediaUrl('/pwa-192.png');
+  if (fallback512) {
+    list.push({ src: fallback512, sizes: '512x512', type: 'image/png' });
+  }
+  if (fallback192) {
+    list.push({ src: fallback192, sizes: '192x192', type: 'image/png' });
+  }
+  return list;
+}
+
 interface MusicContextType {
   // Catalog
   allTracks: MenderMusicTrack[];
@@ -208,6 +261,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playbackReqIdRef = useRef<number>(0);
   const checkedTrackLikesRef = useRef<Set<string>>(new Set());
+  const resolvedSrcCacheRef = useRef<Map<string, string>>(new Map());
 
   // Load user-specific favorites, history, and built-in track counters from localStorage
   useEffect(() => {
@@ -501,22 +555,88 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [firebaseUser]
   );
 
-  // Initialize the persistent HTML5 Audio element
+  // Initialize the persistent HTML5 Audio element (preserved across all sections & background)
   useEffect(() => {
     if (!audioRef.current) {
       const audio = new Audio();
       audio.preload = 'auto';
-      audio.volume = volume;
+      audio.setAttribute('playsinline', 'true');
+      audio.setAttribute('webkit-playsinline', 'true');
+      audio.setAttribute('x-webkit-airplay', 'allow');
+      audio.volume = isMuted ? 0 : volume;
       audioRef.current = audio;
     }
   }, []);
 
-  const resolveTrackAudioSrc = useCallback(async (track: MenderMusicTrack): Promise<string> => {
-    if (track.audioUrl.startsWith('synth://') || track.synthPreset) {
-      return resolveSynthAudioUrl(track.synthPreset || track.audioUrl);
+  // Keep native HTMLAudioElement loop flag synced so repeatMode === 'one' loops natively in background
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.loop = repeatMode === 'one';
     }
-    return await resolvePlayableMediaUrl(track.audioUrl);
+  }, [repeatMode]);
+
+  const getCachedTrackAudioSrc = useCallback((track: MenderMusicTrack): string | null => {
+    const key = getTrackSourceKey(track);
+    const cached = resolvedSrcCacheRef.current.get(key);
+    if (cached) return cached;
+
+    if (track.audioUrl.startsWith('synth://') || track.synthPreset) {
+      const synthSrc = resolveSynthAudioUrl(track.synthPreset || track.audioUrl);
+      if (synthSrc) {
+        resolvedSrcCacheRef.current.set(key, synthSrc);
+        return synthSrc;
+      }
+    }
+
+    if (/^https?:\/\//i.test(track.audioUrl) || track.audioUrl.startsWith('blob:')) {
+      resolvedSrcCacheRef.current.set(key, track.audioUrl);
+      return track.audioUrl;
+    }
+
+    return null;
   }, []);
+
+  const resolveTrackAudioSrc = useCallback(
+    async (track: MenderMusicTrack): Promise<string> => {
+      const syncCached = getCachedTrackAudioSrc(track);
+      if (syncCached) return syncCached;
+
+      const resolved = await resolvePlayableMediaUrl(track.audioUrl);
+      if (resolved) {
+        resolvedSrcCacheRef.current.set(getTrackSourceKey(track), resolved);
+      }
+      return resolved;
+    },
+    [getCachedTrackAudioSrc]
+  );
+
+  // Pre-resolve current, next, and previous track URLs so background `ended` transitions have zero async delay
+  useEffect(() => {
+    if (!currentTrack) return;
+    const activeList = queue.length > 0 ? queue : allTracks;
+    if (activeList.length === 0) return;
+
+    const idx = activeList.findIndex(t => t.trackId === currentTrack.trackId);
+    if (idx < 0) return;
+
+    const candidates: MenderMusicTrack[] = [activeList[idx]];
+    if (idx + 1 < activeList.length) {
+      candidates.push(activeList[idx + 1]);
+    } else if (repeatMode === 'all' && activeList[0]) {
+      candidates.push(activeList[0]);
+    }
+
+    const prevIdx = idx > 0 ? idx - 1 : activeList.length - 1;
+    if (activeList[prevIdx] && activeList[prevIdx].trackId !== currentTrack.trackId) {
+      candidates.push(activeList[prevIdx]);
+    }
+
+    candidates.forEach(item => {
+      if (!getCachedTrackAudioSrc(item)) {
+        void resolveTrackAudioSrc(item);
+      }
+    });
+  }, [allTracks, currentTrack, getCachedTrackAudioSrc, queue, repeatMode, resolveTrackAudioSrc]);
 
   const playTrack = useCallback(
     async (track: MenderMusicTrack, customQueue?: MenderMusicTrack[]) => {
@@ -543,6 +663,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // If clicking the already loaded track, toggle play/pause or restart if ended
       if (currentTrack?.trackId === track.trackId && audio.src) {
         if (audio.paused) {
+          audio.volume = isMuted ? 0 : volume;
           try {
             await audio.play();
             if (reqId === playbackReqIdRef.current) {
@@ -562,7 +683,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setCurrentTime(0);
       setDuration(track.duration || 36);
 
-      const playableSrc = await resolveTrackAudioSrc(track);
+      const playableSrc = getCachedTrackAudioSrc(track) || (await resolveTrackAudioSrc(track));
       if (!playableSrc || reqId !== playbackReqIdRef.current) return;
 
       audio.pause();
@@ -582,7 +703,16 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsPlaying(false);
       }
     },
-    [currentTrack, isMuted, isShuffle, queue, recordTrackPlay, resolveTrackAudioSrc, volume]
+    [
+      currentTrack,
+      getCachedTrackAudioSrc,
+      isMuted,
+      isShuffle,
+      queue,
+      recordTrackPlay,
+      resolveTrackAudioSrc,
+      volume,
+    ]
   );
 
   const pauseMusic = useCallback(() => {
@@ -608,8 +738,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const reqId = ++playbackReqIdRef.current;
     if (!audio.src) {
-      const src = await resolveTrackAudioSrc(currentTrack);
-      if (reqId !== playbackReqIdRef.current) return;
+      const src = getCachedTrackAudioSrc(currentTrack) || (await resolveTrackAudioSrc(currentTrack));
+      if (!src || reqId !== playbackReqIdRef.current) return;
       audio.src = src;
     }
 
@@ -624,7 +754,16 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {
       setIsPlaying(false);
     }
-  }, [allTracks, currentTrack, isMuted, playTrack, queue, resolveTrackAudioSrc, volume]);
+  }, [
+    allTracks,
+    currentTrack,
+    getCachedTrackAudioSrc,
+    isMuted,
+    playTrack,
+    queue,
+    resolveTrackAudioSrc,
+    volume,
+  ]);
 
   const togglePlayPause = useCallback(async () => {
     const audio = audioRef.current;
@@ -660,16 +799,23 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
 
-    if (idx + 1 < activeList.length) {
-      const nextItem = activeList[idx + 1];
+    const nextItem =
+      idx + 1 < activeList.length
+        ? activeList[idx + 1]
+        : repeatMode === 'all'
+          ? activeList[0]
+          : null;
+
+    if (nextItem) {
       const audio = audioRef.current;
       if (audio) {
         const reqId = ++playbackReqIdRef.current;
-        const src = await resolveTrackAudioSrc(nextItem);
-        if (reqId !== playbackReqIdRef.current) return;
+        const src = getCachedTrackAudioSrc(nextItem) || (await resolveTrackAudioSrc(nextItem));
+        if (!src || reqId !== playbackReqIdRef.current) return;
         setCurrentTrack(nextItem);
         setCurrentTime(0);
         setDuration(nextItem.duration || 36);
+        audio.volume = isMuted ? 0 : volume;
         audio.src = src;
         audio.currentTime = 0;
         try {
@@ -684,30 +830,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setIsPlaying(false);
         }
       }
-    } else if (repeatMode === 'all') {
-      const firstItem = activeList[0];
-      const audio = audioRef.current;
-      if (audio && firstItem) {
-        const reqId = ++playbackReqIdRef.current;
-        const src = await resolveTrackAudioSrc(firstItem);
-        if (reqId !== playbackReqIdRef.current) return;
-        setCurrentTrack(firstItem);
-        setCurrentTime(0);
-        setDuration(firstItem.duration || 36);
-        audio.src = src;
-        audio.currentTime = 0;
-        try {
-          await audio.play();
-          if (reqId !== playbackReqIdRef.current) {
-            audio.pause();
-            return;
-          }
-          setIsPlaying(true);
-          void recordTrackPlay(firstItem);
-        } catch {
-          setIsPlaying(false);
-        }
-      }
     } else {
       const audio = audioRef.current;
       if (audio) {
@@ -717,7 +839,18 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setIsPlaying(false);
       setCurrentTime(0);
     }
-  }, [allTracks, currentTrack, playTrack, queue, recordTrackPlay, repeatMode, resolveTrackAudioSrc]);
+  }, [
+    allTracks,
+    currentTrack,
+    getCachedTrackAudioSrc,
+    isMuted,
+    playTrack,
+    queue,
+    recordTrackPlay,
+    repeatMode,
+    resolveTrackAudioSrc,
+    volume,
+  ]);
 
   const prevTrack = useCallback(async () => {
     const audio = audioRef.current;
@@ -736,11 +869,12 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!prevItem || !audio) return;
 
     const reqId = ++playbackReqIdRef.current;
-    const src = await resolveTrackAudioSrc(prevItem);
-    if (reqId !== playbackReqIdRef.current) return;
+    const src = getCachedTrackAudioSrc(prevItem) || (await resolveTrackAudioSrc(prevItem));
+    if (!src || reqId !== playbackReqIdRef.current) return;
     setCurrentTrack(prevItem);
     setCurrentTime(0);
     setDuration(prevItem.duration || 36);
+    audio.volume = isMuted ? 0 : volume;
     audio.src = src;
     audio.currentTime = 0;
     try {
@@ -754,15 +888,48 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {
       setIsPlaying(false);
     }
-  }, [allTracks, currentTrack, queue, recordTrackPlay, resolveTrackAudioSrc]);
+  }, [
+    allTracks,
+    currentTrack,
+    getCachedTrackAudioSrc,
+    isMuted,
+    queue,
+    recordTrackPlay,
+    resolveTrackAudioSrc,
+    volume,
+  ]);
 
-  const seekTo = useCallback((seconds: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const clamped = Math.max(0, Math.min(seconds, duration || audio.duration || 0));
-    audio.currentTime = clamped;
-    setCurrentTime(clamped);
-  }, [duration]);
+  const seekTo = useCallback(
+    (seconds: number) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      const totalDur = Math.max(
+        0,
+        Number.isFinite(audio.duration) && audio.duration > 0
+          ? audio.duration
+          : duration || currentTrack?.duration || 0
+      );
+      const clamped = Math.max(0, Math.min(seconds, totalDur));
+      audio.currentTime = clamped;
+      setCurrentTime(clamped);
+      if (
+        totalDur > 0 &&
+        'mediaSession' in navigator &&
+        typeof navigator.mediaSession.setPositionState === 'function'
+      ) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: totalDur,
+            playbackRate: audio.playbackRate || 1,
+            position: clamped,
+          });
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [currentTrack?.duration, duration]
+  );
 
   const setVolume = useCallback((vol: number) => {
     const clamped = Math.max(0, Math.min(1, vol));
@@ -849,21 +1016,23 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCurrentTrack(null);
   }, []);
 
-  // Attach HTML5 Audio listeners for timeupdate, loadedmetadata, and ended
+  // Attach HTML5 Audio listeners for timeupdate, loadedmetadata, ended, error, and background sync
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime || 0);
+    const syncPositionState = () => {
       if ('mediaSession' in navigator && typeof navigator.mediaSession.setPositionState === 'function') {
-        const dur = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
-        if (dur > 0 && audio.currentTime <= dur) {
+        const dur =
+          Number.isFinite(audio.duration) && audio.duration > 0
+            ? audio.duration
+            : currentTrack?.duration || duration;
+        if (dur > 0 && Number.isFinite(audio.currentTime) && audio.currentTime <= dur) {
           try {
             navigator.mediaSession.setPositionState({
               duration: dur,
               playbackRate: audio.playbackRate || 1,
-              position: audio.currentTime,
+              position: Math.max(0, audio.currentTime),
             });
           } catch {
             // ignore
@@ -872,10 +1041,16 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     };
 
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime || 0);
+      syncPositionState();
+    };
+
     const handleLoadedMetadata = () => {
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
         setDuration(audio.duration);
       }
+      syncPositionState();
     };
 
     const handleEnded = () => {
@@ -889,12 +1064,35 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
+    const handleError = () => setIsPlaying(false);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const actuallyPlaying = Boolean(audio.src) && !audio.paused && !audio.ended;
+        setIsPlaying(actuallyPlaying);
+        setCurrentTime(audio.currentTime || 0);
+        syncPositionState();
+        if ('mediaSession' in navigator) {
+          try {
+            navigator.mediaSession.playbackState = currentTrack
+              ? actuallyPlaying
+                ? 'playing'
+                : 'paused'
+              : 'none';
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
 
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('ended', handleEnded);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
+    audio.addEventListener('error', handleError);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       audio.removeEventListener('timeupdate', handleTimeUpdate);
@@ -902,49 +1100,133 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('error', handleError);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [duration, nextTrack, repeatMode]);
+  }, [currentTrack, duration, nextTrack, repeatMode]);
 
-  // Lock screen & system media controls via MediaSession API
+  // Keep latest callbacks in ref so MediaSession handlers never re-register & flicker OS notification
+  const mediaSessionActionsRef = useRef({
+    resumeMusic,
+    pauseMusic,
+    closePlayer,
+    prevTrack,
+    nextTrack,
+    seekTo,
+  });
+
   useEffect(() => {
-    if (!('mediaSession' in navigator) || !currentTrack) return;
+    mediaSessionActionsRef.current = {
+      resumeMusic,
+      pauseMusic,
+      closePlayer,
+      prevTrack,
+      nextTrack,
+      seekTo,
+    };
+  }, [closePlayer, nextTrack, pauseMusic, prevTrack, resumeMusic, seekTo]);
+
+  // Register MediaSession OS lock-screen / notification bar action handlers once
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+
+    const actions: MediaSessionAction[] = [
+      'play',
+      'pause',
+      'stop',
+      'previoustrack',
+      'nexttrack',
+      'seekbackward',
+      'seekforward',
+      'seekto',
+    ];
 
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: currentTrack.title,
-        artist: currentTrack.artist,
-        album: currentTrack.albumTitle || 'Mender Music',
-        artwork: currentTrack.coverUrl
-          ? [{ src: currentTrack.coverUrl, sizes: '512x512', type: 'image/png' }]
-          : [],
-      });
-
-      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-
       navigator.mediaSession.setActionHandler('play', () => {
-        void resumeMusic();
+        void mediaSessionActionsRef.current.resumeMusic();
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        pauseMusic();
+        mediaSessionActionsRef.current.pauseMusic();
       });
       navigator.mediaSession.setActionHandler('stop', () => {
-        closePlayer();
+        mediaSessionActionsRef.current.closePlayer();
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => {
-        void prevTrack();
+        void mediaSessionActionsRef.current.prevTrack();
       });
       navigator.mediaSession.setActionHandler('nexttrack', () => {
-        void nextTrack();
+        void mediaSessionActionsRef.current.nextTrack();
+      });
+      navigator.mediaSession.setActionHandler('seekbackward', details => {
+        const audio = audioRef.current;
+        const offset = details.seekOffset || 10;
+        const cur = audio ? audio.currentTime : 0;
+        mediaSessionActionsRef.current.seekTo(Math.max(0, cur - offset));
+      });
+      navigator.mediaSession.setActionHandler('seekforward', details => {
+        const audio = audioRef.current;
+        const offset = details.seekOffset || 10;
+        const cur = audio ? audio.currentTime : 0;
+        mediaSessionActionsRef.current.seekTo(cur + offset);
       });
       navigator.mediaSession.setActionHandler('seekto', details => {
         if (typeof details.seekTime === 'number') {
-          seekTo(details.seekTime);
+          mediaSessionActionsRef.current.seekTo(details.seekTime);
         }
       });
     } catch {
       // ignore unsupported MediaSession handlers
     }
-  }, [closePlayer, currentTrack, isPlaying, nextTrack, pauseMusic, prevTrack, resumeMusic, seekTo]);
+
+    return () => {
+      actions.forEach(action => {
+        try {
+          navigator.mediaSession.setActionHandler(action, null);
+        } catch {
+          // ignore
+        }
+      });
+    };
+  }, []);
+
+  // Update lock-screen MediaMetadata only when track identity/cover changes
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      if (!currentTrack) {
+        navigator.mediaSession.metadata = null;
+        return;
+      }
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentTrack.title,
+        artist: currentTrack.artist,
+        album: currentTrack.albumTitle || 'Mender Music',
+        artwork: buildMediaArtwork(currentTrack.coverUrl),
+      });
+    } catch {
+      // ignore unsupported MediaMetadata
+    }
+  }, [
+    currentTrack?.trackId,
+    currentTrack?.title,
+    currentTrack?.artist,
+    currentTrack?.albumTitle,
+    currentTrack?.coverUrl,
+  ]);
+
+  // Update OS lock-screen playbackState cleanly
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = currentTrack
+        ? isPlaying
+          ? 'playing'
+          : 'paused'
+        : 'none';
+    } catch {
+      // ignore
+    }
+  }, [currentTrack, isPlaying]);
 
   // Toggle favorite / like on a track
   const toggleFavoriteTrack = useCallback(

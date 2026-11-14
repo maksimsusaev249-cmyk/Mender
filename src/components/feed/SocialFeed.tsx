@@ -217,11 +217,11 @@ export const SocialFeed: React.FC = () => {
         )}
 
         {/* Tabs: Рекомендации | Подписки | Залайканные */}
-        <div className="flex items-center gap-6 border-b border-[#E1E3E6] mb-4 bg-white px-4 pt-2.5 rounded-t-xl border">
+        <div className="flex items-center gap-4 sm:gap-6 border-b border-[#E1E3E6] mb-4 bg-white px-3 sm:px-4 pt-2.5 rounded-t-xl border overflow-x-auto no-scrollbar">
           <button
             type="button"
             onClick={() => setFeedTab('recommended')}
-            className={`pb-2.5 text-xs font-semibold transition-colors relative cursor-pointer ${
+            className={`pb-2.5 text-xs font-semibold transition-colors relative cursor-pointer whitespace-nowrap shrink-0 ${
               feedTab === 'recommended' ? 'text-[#0077FF]' : 'text-[#818C99] hover:text-[#19191A]'
             }`}
           >
@@ -233,7 +233,7 @@ export const SocialFeed: React.FC = () => {
           <button
             type="button"
             onClick={() => setFeedTab('subscriptions')}
-            className={`pb-2.5 text-xs font-semibold transition-colors relative cursor-pointer ${
+            className={`pb-2.5 text-xs font-semibold transition-colors relative cursor-pointer whitespace-nowrap shrink-0 ${
               feedTab === 'subscriptions' ? 'text-[#0077FF]' : 'text-[#818C99] hover:text-[#19191A]'
             }`}
           >
@@ -245,11 +245,11 @@ export const SocialFeed: React.FC = () => {
           <button
             type="button"
             onClick={() => setFeedTab('liked')}
-            className={`pb-2.5 text-xs font-semibold transition-colors relative cursor-pointer flex items-center gap-1.5 ${
+            className={`pb-2.5 text-xs font-semibold transition-colors relative cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               feedTab === 'liked' ? 'text-[#E64646]' : 'text-[#818C99] hover:text-[#19191A]'
             }`}
           >
-            <Heart className="w-3.5 h-3.5 fill-current" />
+            <Heart className="w-3.5 h-3.5 fill-current shrink-0" />
             <span>Понравилось</span>
             {feedTab === 'liked' && (
               <span className="absolute bottom-0 left-0 right-0 h-0.5 rounded-full bg-[#E64646]" />

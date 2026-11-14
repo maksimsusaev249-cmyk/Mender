@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Post, PostComment } from '../../types';
 import { PostMediaViewer } from '../feed/PostMediaViewer';
+import { Avatar } from '../common/Avatar';
 
 export const UserProfileModal: React.FC = () => {
   const {
@@ -126,8 +127,8 @@ export const UserProfileModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4 select-none">
-      <div className="w-full max-w-2xl bg-[#EDEEF0] border border-[#E1E3E6] rounded-2xl shadow-2xl overflow-hidden text-[#19191A] flex flex-col max-h-[88vh]">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 select-none">
+      <div className="w-full max-w-2xl bg-[#EDEEF0] border border-[#E1E3E6] rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden text-[#19191A] flex flex-col max-h-[92dvh] sm:max-h-[88vh]">
         {/* Шапка модального окна профиля */}
         <div className="px-5 py-3.5 border-b border-[#E1E3E6] flex items-center justify-between bg-white">
           <div className="flex items-center gap-2">
@@ -138,7 +139,7 @@ export const UserProfileModal: React.FC = () => {
           <button
             type="button"
             onClick={closeUserProfile}
-            className="p-1.5 rounded-lg hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#19191A] cursor-pointer transition-colors"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#19191A] cursor-pointer transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -149,10 +150,10 @@ export const UserProfileModal: React.FC = () => {
           {/* Карточка пользователя */}
           <div className="bg-white border border-[#E1E3E6] rounded-xl p-4 flex flex-col sm:flex-row items-center gap-4 shadow-xs">
             <div className="relative shrink-0">
-              <img
+              <Avatar
                 src={viewedUserProfile.avatarUrl}
-                alt={viewedUserProfile.displayName}
-                className="w-20 h-20 rounded-full object-cover border border-[#E1E3E6] bg-[#EDEFEF]"
+                name={viewedUserProfile.displayName}
+                className="w-20 h-20 rounded-full border border-[#E1E3E6] text-xl"
               />
               {viewedUserProfile.privacyLastSeen !== 'nobody' &&
                 viewedUserProfile.status === 'online' && (
@@ -359,10 +360,10 @@ export const UserProfileModal: React.FC = () => {
                                   key={comment.commentId}
                                   className="flex items-start gap-2.5 text-xs"
                                 >
-                                  <img
+                                  <Avatar
                                     src={comment.authorAvatar}
-                                    alt={comment.authorName}
-                                    className="w-7 h-7 rounded-full object-cover shrink-0 mt-0.5 border border-[#E1E3E6]"
+                                    name={comment.authorName}
+                                    className="w-7 h-7 rounded-full shrink-0 mt-0.5 border border-[#E1E3E6]"
                                   />
                                   <div className="flex-1 bg-[#F5F6F8] rounded-xl p-2.5">
                                     <div className="flex items-center justify-between mb-0.5">

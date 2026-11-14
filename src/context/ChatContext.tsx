@@ -3,6 +3,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -19,6 +20,7 @@ import {
   ChatMember,
   Message,
   MessageType,
+  TypingStatus,
   Post,
   PostMediaItem,
   PostComment,
@@ -110,6 +112,7 @@ interface ChatContextType {
   activeChat: Chat | null;
   activeChatMembers: ChatMember[];
   messages: Message[];
+  typingUsersByChat: Record<string, TypingStatus[]>;
   messageLikesByMe: Record<string, boolean>;
   messageReactions: Record<string, string>;
   deletedForMeMessageIds: Record<string, boolean>;
@@ -118,7 +121,7 @@ interface ChatContextType {
   postComments: Record<string, PostComment[]>;
   commentLikesByMe: Record<string, boolean>;
   commentLikesCount: Record<string, number>;
-  activeTab: 'chats' | 'feed' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu';
+  activeTab: 'chats' | 'feed' | 'people' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu';
   searchQuery: string;
   // Wallpapers state & actions
   wallpaperConfigs: Record<string, WallpaperConfig>;
@@ -152,7 +155,7 @@ interface ChatContextType {
   selectedCameraId: string;
   groupCallParticipants: GroupCallParticipant[];
   // Actions
-  setActiveTab: (tab: 'chats' | 'feed' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu') => void;
+  setActiveTab: (tab: 'chats' | 'feed' | 'people' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu') => void;
   setActiveChatId: (chatId: string | null) => void;
   setSearchQuery: (q: string) => void;
   startDirectChatWithUser: (peerUser: UserPublic) => Promise<string>;
@@ -180,6 +183,10 @@ interface ChatContextType {
   removeMemberFromChat: (chatId: string, memberUid: string) => Promise<void>;
   togglePinChat: (chatId: string) => Promise<void>;
   toggleMuteChat: (chatId: string) => Promise<void>;
+  toggleArchiveChat: (chatId: string) => Promise<void>;
+  deleteChatForMe: (chatId: string) => Promise<void>;
+  deleteChatForBoth: (chatId: string) => Promise<void>;
+  setChatTyping: (chatId: string, isTyping: boolean) => Promise<void>;
   sendMessage: (params: {
     content: string;
     type?: MessageType;
@@ -251,7 +258,21 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [activeChatMembers, setActiveChatMembers] = useState<ChatMember[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [rawMessages, setRawMessages] = useState<Message[]>([]);
+  const [rawTypingMap, setRawTypingMap] = useState<Record<string, TypingStatus[]>>({});
+  const [typingNowMs, setTypingNowMs] = useState<number>(() => Date.now());
+  const [chatPrefs, setChatPrefs] = useState<
+    Record<
+      string,
+      {
+        isPinned?: boolean;
+        isMuted?: boolean;
+        isArchived?: boolean;
+        isHidden?: boolean;
+        clearedAtMs?: number;
+      }
+    >
+  >({});
   const [messageLikesByMe, setMessageLikesByMe] = useState<Record<string, boolean>>(() => {
     try {
       return JSON.parse(localStorage.getItem('mender_message_likes_me') || '{}');
@@ -292,7 +313,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   });
 
-  const [activeTab, setActiveTab] = useState<'chats' | 'feed' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu'>('chats');
+  const [activeTab, setActiveTab] = useState<'chats' | 'feed' | 'people' | 'video' | 'music' | 'calls' | 'channels' | 'settings' | 'menu'>('chats');
   const [searchQuery, setSearchQuery] = useState('');
   const [myProfileFolders, setMyProfileFolders] = useState<ProfileFolder[]>([]);
   const [viewedUserProfile, setViewedUserProfile] = useState<UserPublic | null>(null);
@@ -344,6 +365,19 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     isScreenSharingRef.current = isScreenSharing;
   }, [isScreenSharing]);
+
+  useEffect(() => {
+    if (!firebaseUser?.uid) {
+      setChatPrefs({});
+      return;
+    }
+    try {
+      const saved = localStorage.getItem(`mender_chat_prefs_${firebaseUser.uid}`);
+      setChatPrefs(saved ? JSON.parse(saved) : {});
+    } catch {
+      setChatPrefs({});
+    }
+  }, [firebaseUser?.uid]);
 
   useEffect(() => {
     if (!isAuthReady || !firebaseUser || !profile) {
@@ -635,6 +669,13 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 ...prev,
                 [chatId]: snap.data() as Chat,
               }));
+            } else {
+              setMemberFetchedChatsMap(prev => {
+                if (!(chatId in prev)) return prev;
+                const next = { ...prev };
+                delete next[chatId];
+                return next;
+              });
             }
           },
           () => {}
@@ -652,6 +693,16 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const merged = new Map<string, Chat>();
     const addChat = (c: Chat) => {
       const mem = memberships[c.chatId];
+      const localPref = chatPrefs[c.chatId];
+      const isHidden = Boolean(localPref?.isHidden ?? mem?.isHidden);
+      const clearedAtMs = Number(localPref?.clearedAtMs ?? mem?.clearedAtMs ?? 0);
+      if (isHidden) {
+        const chatUpdatedMs = c.updatedAt ? extractTimestampMs(c.updatedAt, c.chatId) : 0;
+        if (!chatUpdatedMs || chatUpdatedMs <= clearedAtMs) {
+          return;
+        }
+      }
+
       let resolvedName = c.name;
       let resolvedAvatar = c.avatarUrl;
 
@@ -675,8 +726,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         name: resolvedName,
         avatarUrl: resolvedAvatar,
         myRole: mem?.role || (c.ownerId === firebaseUser?.uid ? 'owner' : 'member'),
-        isPinned: mem?.isPinned || false,
-        isMuted: mem?.isMuted || false,
+        isPinned: Boolean(localPref?.isPinned ?? mem?.isPinned),
+        isMuted: Boolean(localPref?.isMuted ?? mem?.isMuted),
+        isArchived: Boolean(localPref?.isArchived ?? mem?.isArchived),
       });
     };
 
@@ -691,7 +743,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (firebaseUser?.uid) {
       const secChatId = `chat_system_security_${firebaseUser.uid}`;
-      if (!merged.has(secChatId)) {
+      const secPref = chatPrefs[secChatId];
+      const secHidden = Boolean(secPref?.isHidden);
+      if (!merged.has(secChatId) && !secHidden) {
         merged.set(secChatId, {
           chatId: secChatId,
           type: 'direct',
@@ -706,8 +760,9 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           lastMessageType: 'text',
           lastMessageSenderId: 'mender_security_bot',
           myRole: 'owner',
-          isPinned: true,
-          isMuted: false,
+          isPinned: secPref?.isPinned ?? true,
+          isMuted: secPref?.isMuted ?? false,
+          isArchived: secPref?.isArchived ?? false,
         });
       }
     }
@@ -725,10 +780,20 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     memberFetchedChatsMap,
     publicChatsMap,
     memberships,
+    chatPrefs,
     firebaseUser,
     profile?.displayName,
     usersDirectory,
   ]);
+
+  const messages: Message[] = React.useMemo(() => {
+    if (!activeChatId) return rawMessages;
+    const mem = memberships[activeChatId];
+    const pref = chatPrefs[activeChatId];
+    const clearedAtMs = Number(pref?.clearedAtMs ?? mem?.clearedAtMs ?? 0);
+    if (!clearedAtMs) return rawMessages;
+    return rawMessages.filter(m => extractTimestampMs(m.createdAt, m.messageId) > clearedAtMs);
+  }, [rawMessages, activeChatId, memberships, chatPrefs]);
 
   const publicChannelsAndGroups: Chat[] = React.useMemo(() => {
     return Object.values(publicChatsMap).sort((a, b) => (b.membersCount || 0) - (a.membersCount || 0));
@@ -882,7 +947,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     if (!activeChat || !firebaseUser || !profile) {
       setActiveChatMembers([]);
-      setMessages([]);
+      setRawMessages([]);
       return;
     }
 
@@ -917,7 +982,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const list = snap.docs
             .map(d => d.data() as Message)
             .sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
-          setMessages(list);
+          setRawMessages(list);
         },
         err => handleFirestoreError(err, OperationType.LIST, `chats/${chatId}/messages`)
       );
@@ -931,7 +996,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const sorted = Array.from(map.values()).sort(
           (a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0)
         );
-        setMessages(sorted);
+        setRawMessages(sorted);
       };
 
       const sentQuery = query(
@@ -971,6 +1036,117 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [activeChat?.chatId, activeChat?.visibility, firebaseUser, profile]);
 
+  const watchTypingIdsKey = React.useMemo(() => {
+    if (!firebaseUser || !profile) return '';
+    const ids = new Set<string>();
+    if (activeChatId && !activeChatId.startsWith('chat_system_security_')) {
+      ids.add(activeChatId);
+    }
+    for (const c of chats) {
+      if (ids.size >= 12) break;
+      if (!c.isArchived && !c.chatId.startsWith('chat_system_security_')) {
+        ids.add(c.chatId);
+      }
+    }
+    return Array.from(ids).sort().join('|');
+  }, [activeChatId, chats, firebaseUser, profile]);
+
+  useEffect(() => {
+    if (!watchTypingIdsKey || !firebaseUser?.uid) {
+      setRawTypingMap({});
+      return;
+    }
+    const uid = firebaseUser.uid;
+    const chatIds = watchTypingIdsKey.split('|').filter(Boolean);
+    const unsubs: (() => void)[] = [];
+
+    chatIds.forEach(chatId => {
+      const typingQuery = query(
+        collection(db, 'chats', chatId, 'typing'),
+        where('chatId', '==', chatId),
+        where('isTyping', '==', true)
+      );
+      const unsub = onSnapshot(
+        typingQuery,
+        snap => {
+          const others = snap.docs
+            .map(d => d.data() as TypingStatus)
+            .filter(t => t.userId !== uid && t.isTyping);
+          setRawTypingMap(prev => {
+            if (others.length === 0 && !(chatId in prev)) return prev;
+            const next = { ...prev };
+            if (others.length === 0) {
+              delete next[chatId];
+            } else {
+              next[chatId] = others;
+            }
+            return next;
+          });
+        },
+        () => {}
+      );
+      unsubs.push(unsub);
+    });
+
+    return () => {
+      unsubs.forEach(u => u());
+    };
+  }, [watchTypingIdsKey, firebaseUser?.uid]);
+
+  const hasAnyRawTyping = React.useMemo(
+    () => Object.values(rawTypingMap).some(list => list.length > 0),
+    [rawTypingMap]
+  );
+
+  useEffect(() => {
+    if (!hasAnyRawTyping) return;
+    setTypingNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setTypingNowMs(Date.now());
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [hasAnyRawTyping]);
+
+  const typingUsersByChat: Record<string, TypingStatus[]> = React.useMemo(() => {
+    const out: Record<string, TypingStatus[]> = {};
+    for (const [chatId, list] of Object.entries(rawTypingMap)) {
+      const fresh = list.filter(item => {
+        if (!item.isTyping) return false;
+        if (!item.updatedAt) return true;
+        const updatedMs = extractTimestampMs(item.updatedAt);
+        return typingNowMs - updatedMs < 7000;
+      });
+      if (fresh.length > 0) {
+        out[chatId] = fresh;
+      }
+    }
+    return out;
+  }, [rawTypingMap, typingNowMs]);
+
+  const setChatTyping = useCallback(
+    async (chatId: string, isTyping: boolean) => {
+      if (!firebaseUser || !profile || !chatId) return;
+      if (chatId.startsWith('chat_system_security_')) return;
+      const uid = firebaseUser.uid;
+      const cleanChatId = sanitizeId(chatId);
+      const displayName = (profile.displayName || profile.username || 'Пользователь')
+        .trim()
+        .slice(0, 80);
+      try {
+        await setDoc(doc(db, 'chats', cleanChatId, 'typing', uid), {
+          chatId: cleanChatId,
+          userId: uid,
+          displayName: displayName || 'Пользователь',
+          isTyping,
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        // Ignore transient typing sync failures (offline / permissions on virtual/readonly chats)
+      }
+    },
+    [firebaseUser, profile]
+  );
+
   const startDirectChatWithUser = async (peerUser: UserPublic): Promise<string> => {
     if (!firebaseUser || !profile) throw new Error('Необходима авторизация');
     const myUid = firebaseUser.uid;
@@ -984,6 +1160,11 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActiveChatId(chatId);
       setActiveTab('chats');
       return chatId;
+    }
+
+    // Unhide if this direct chat was previously deleted only for current user
+    if (chatPrefs[chatId]?.isHidden || memberships[chatId]?.isHidden) {
+      await upsertChatPreference(chatId, { isHidden: false });
     }
 
     try {
@@ -1418,33 +1599,267 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const togglePinChat = async (chatId: string) => {
+  const upsertChatPreference = async (
+    chatId: string,
+    patch: Partial<{
+      isPinned: boolean;
+      isMuted: boolean;
+      isArchived: boolean;
+      isHidden: boolean;
+      clearedAtMs: number;
+    }>
+  ) => {
     if (!firebaseUser) return;
+    const uid = firebaseUser.uid;
     const mem = memberships[chatId];
-    if (!mem) return;
+    const currentChat =
+      chats.find(c => c.chatId === chatId) ||
+      ownedChatsMap[chatId] ||
+      peerChatsMap[chatId] ||
+      memberFetchedChatsMap[chatId] ||
+      publicChatsMap[chatId];
+
+    const nextPref = {
+      ...(chatPrefs[chatId] || {}),
+      ...patch,
+    };
+
+    setChatPrefs(prev => {
+      const updated = { ...prev, [chatId]: nextPref };
+      try {
+        localStorage.setItem(`mender_chat_prefs_${uid}`, JSON.stringify(updated));
+      } catch {
+        // ignore storage errors
+      }
+      return updated;
+    });
+
+    const isVirtualSystemChat =
+      chatId.startsWith('chat_system_security_') &&
+      !ownedChatsMap[chatId] &&
+      !mem;
+    if (isVirtualSystemChat) {
+      return;
+    }
+
+    const nextIsPinned = patch.isPinned ?? nextPref.isPinned ?? mem?.isPinned ?? false;
+    const nextIsMuted = patch.isMuted ?? nextPref.isMuted ?? mem?.isMuted ?? false;
+    const nextIsArchived = patch.isArchived ?? nextPref.isArchived ?? mem?.isArchived ?? false;
+    const nextIsHidden = patch.isHidden ?? nextPref.isHidden ?? mem?.isHidden ?? false;
+    const nextClearedAtMs = Number(
+      patch.clearedAtMs ?? nextPref.clearedAtMs ?? mem?.clearedAtMs ?? 0
+    );
+
+    const memRef = doc(db, 'users', uid, 'memberships', chatId);
     try {
-      await updateDoc(doc(db, 'users', firebaseUser.uid, 'memberships', chatId), {
-        isPinned: !mem.isPinned,
-        isMuted: mem.isMuted,
-        updatedAt: serverTimestamp(),
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${firebaseUser.uid}/memberships/${chatId}`);
+      if (mem) {
+        const updatePayload: Record<string, any> = {
+          isPinned: nextIsPinned,
+          isMuted: nextIsMuted,
+          isArchived: nextIsArchived,
+          isHidden: nextIsHidden,
+          updatedAt: serverTimestamp(),
+        };
+        if (nextClearedAtMs > 0) {
+          updatePayload.clearedAtMs = Math.round(nextClearedAtMs);
+        }
+        await updateDoc(memRef, updatePayload);
+      } else if (currentChat) {
+        const role =
+          currentChat.ownerId === uid
+            ? 'owner'
+            : currentChat.myRole || 'member';
+        const createPayload: Record<string, any> = {
+          userId: uid,
+          chatId,
+          role,
+          isPinned: nextIsPinned,
+          isMuted: nextIsMuted,
+          isArchived: nextIsArchived,
+          isHidden: nextIsHidden,
+          joinedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        if (nextClearedAtMs > 0) {
+          createPayload.clearedAtMs = Math.round(nextClearedAtMs);
+        }
+        await setDoc(memRef, createPayload);
+      }
+    } catch {
+      // Local state & localStorage already updated cleanly
     }
   };
 
+  const togglePinChat = async (chatId: string) => {
+    const current = chats.find(c => c.chatId === chatId);
+    const currentPinned = Boolean(
+      chatPrefs[chatId]?.isPinned ?? memberships[chatId]?.isPinned ?? current?.isPinned
+    );
+    await upsertChatPreference(chatId, { isPinned: !currentPinned });
+  };
+
   const toggleMuteChat = async (chatId: string) => {
+    const current = chats.find(c => c.chatId === chatId);
+    const currentMuted = Boolean(
+      chatPrefs[chatId]?.isMuted ?? memberships[chatId]?.isMuted ?? current?.isMuted
+    );
+    await upsertChatPreference(chatId, { isMuted: !currentMuted });
+  };
+
+  const toggleArchiveChat = async (chatId: string) => {
+    const current = chats.find(c => c.chatId === chatId);
+    const currentArchived = Boolean(
+      chatPrefs[chatId]?.isArchived ?? memberships[chatId]?.isArchived ?? current?.isArchived
+    );
+    await upsertChatPreference(chatId, { isArchived: !currentArchived });
+  };
+
+  const deleteChatForMe = async (chatId: string) => {
     if (!firebaseUser) return;
-    const mem = memberships[chatId];
-    if (!mem) return;
+    await upsertChatPreference(chatId, {
+      isHidden: true,
+      isArchived: false,
+      isPinned: false,
+      clearedAtMs: Date.now(),
+    });
+    if (activeChatId === chatId) {
+      setActiveChatId(null);
+    }
+  };
+
+  const deleteChatForBoth = async (chatId: string) => {
+    if (!firebaseUser) return;
+    const uid = firebaseUser.uid;
+    const targetChat =
+      chats.find(c => c.chatId === chatId) ||
+      ownedChatsMap[chatId] ||
+      peerChatsMap[chatId] ||
+      memberFetchedChatsMap[chatId] ||
+      publicChatsMap[chatId];
+
+    // Virtual system security chat has no shared peer: delete locally for user
+    if (chatId.startsWith('chat_system_security_') && !ownedChatsMap[chatId]) {
+      await deleteChatForMe(chatId);
+      return;
+    }
+
     try {
-      await updateDoc(doc(db, 'users', firebaseUser.uid, 'memberships', chatId), {
-        isPinned: mem.isPinned,
-        isMuted: !mem.isMuted,
-        updatedAt: serverTimestamp(),
-      });
+      // 1. Delete readable messages in the chat
+      const messageRefsMap = new Map<string, ReturnType<typeof doc>>();
+      if (targetChat?.visibility === 'public') {
+        const pubSnap = await getDocs(
+          query(
+            collection(db, 'chats', chatId, 'messages'),
+            where('chatId', '==', chatId),
+            where('chatVisibility', '==', 'public')
+          )
+        );
+        pubSnap.docs.forEach(d => messageRefsMap.set(d.id, d.ref));
+      } else {
+        const [sentSnap, recSnap] = await Promise.all([
+          getDocs(
+            query(
+              collection(db, 'chats', chatId, 'messages'),
+              where('chatId', '==', chatId),
+              where('senderId', '==', uid)
+            )
+          ),
+          getDocs(
+            query(
+              collection(db, 'chats', chatId, 'messages'),
+              where('chatId', '==', chatId),
+              where('recipientId', '==', uid)
+            )
+          ),
+        ]);
+        sentSnap.docs.forEach(d => messageRefsMap.set(d.id, d.ref));
+        recSnap.docs.forEach(d => messageRefsMap.set(d.id, d.ref));
+      }
+
+      const refs = Array.from(messageRefsMap.values());
+      for (let i = 0; i < refs.length; i += 400) {
+        const batch = writeBatch(db);
+        refs.slice(i, i + 400).forEach(ref => batch.delete(ref));
+        await batch.commit();
+      }
+
+      // 2. Clean up own member + membership + typing records
+      try {
+        await deleteDoc(doc(db, 'chats', chatId, 'members', uid));
+      } catch {
+        // ignore if already missing
+      }
+      try {
+        await deleteDoc(doc(db, 'chats', chatId, 'typing', uid));
+      } catch {
+        // ignore if already missing
+      }
+      try {
+        const typingSnap = await getDocs(
+          query(collection(db, 'chats', chatId, 'typing'), where('chatId', '==', chatId))
+        );
+        for (const d of typingSnap.docs) {
+          await deleteDoc(d.ref).catch(() => {});
+        }
+      } catch {
+        // ignore typing cleanup errors
+      }
+      try {
+        await deleteDoc(doc(db, 'users', uid, 'memberships', chatId));
+      } catch {
+        // ignore if already missing
+      }
+
+      // 3. Delete chat document itself (allowed for owner or direct peer)
+      await deleteDoc(doc(db, 'chats', chatId));
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${firebaseUser.uid}/memberships/${chatId}`);
+      handleFirestoreError(err, OperationType.DELETE, `chats/${chatId}`);
+    }
+
+    // 4. Optimistically remove from local maps
+    setOwnedChatsMap(prev => {
+      if (!(chatId in prev)) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+    setPeerChatsMap(prev => {
+      if (!(chatId in prev)) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+    setMemberFetchedChatsMap(prev => {
+      if (!(chatId in prev)) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+    setPublicChatsMap(prev => {
+      if (!(chatId in prev)) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+    setMemberships(prev => {
+      if (!(chatId in prev)) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      return next;
+    });
+    setChatPrefs(prev => {
+      if (!(chatId in prev)) return prev;
+      const next = { ...prev };
+      delete next[chatId];
+      try {
+        localStorage.setItem(`mender_chat_prefs_${uid}`, JSON.stringify(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+    if (activeChatId === chatId) {
+      setActiveChatId(null);
     }
   };
 
@@ -1538,7 +1953,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanContent = newContent.trim().slice(0, 4000);
     if (!cleanContent) return;
 
-    setMessages(prev =>
+    setRawMessages(prev =>
       prev.map(m => (m.messageId === messageId ? { ...m, content: cleanContent } : m))
     );
 
@@ -1579,7 +1994,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!activeChat || !firebaseUser) return;
     const msg = messages.find(m => m.messageId === messageId);
     if (!msg) return;
-    setMessages(prev => prev.filter(m => m.messageId !== messageId));
+    setRawMessages(prev => prev.filter(m => m.messageId !== messageId));
     try {
       await deleteDoc(doc(db, 'chats', activeChat.chatId, 'messages', messageId));
     } catch (err) {
@@ -1603,7 +2018,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatedReactionsMap = { ...messageReactions, [msg.messageId]: nextEmoji };
     setMessageLikesByMe(updatedLikesMap);
     setMessageReactions(updatedReactionsMap);
-    setMessages(prev =>
+    setRawMessages(prev =>
       prev.map(m =>
         m.messageId === msg.messageId
           ? { ...m, likesCount: nextLikesCount, reactionEmoji: nextEmoji }
@@ -3351,6 +3766,7 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         activeChat,
         activeChatMembers,
         messages,
+        typingUsersByChat,
         messageLikesByMe,
         messageReactions,
         deletedForMeMessageIds,
@@ -3396,6 +3812,10 @@ export const ChatProvider: React.FC<{ children: React.ReactNode }> = ({ children
         removeMemberFromChat,
         togglePinChat,
         toggleMuteChat,
+        toggleArchiveChat,
+        deleteChatForMe,
+        deleteChatForBoth,
+        setChatTyping,
         sendMessage,
         editMessage,
         deleteMessage,

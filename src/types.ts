@@ -105,6 +105,9 @@ export interface UserMembership {
   role: MemberRole;
   isPinned: boolean;
   isMuted: boolean;
+  isArchived?: boolean;
+  isHidden?: boolean;
+  clearedAtMs?: number;
   joinedAt?: any;
   updatedAt?: any;
 }
@@ -136,6 +139,7 @@ export interface Chat {
   myRole?: MemberRole;
   isPinned?: boolean;
   isMuted?: boolean;
+  isArchived?: boolean;
 }
 
 export interface Message {
@@ -159,6 +163,14 @@ export interface Message {
   forwardedFromName?: string;
   deletedForUserIds?: string[];
   createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface TypingStatus {
+  chatId: string;
+  userId: string;
+  displayName: string;
+  isTyping: boolean;
   updatedAt?: any;
 }
 

@@ -875,12 +875,12 @@ export const MenuHubView: React.FC = () => {
     },
     {
       id: 'contacts',
-      title: 'Контакты',
-      subtitle: 'Каталог пользователей Mender и быстрый старт чата',
+      title: 'Люди',
+      subtitle: 'Пользователи Mender, статусы в сети, подписки и звонки',
       icon: UserCheck,
       color: 'bg-[#06B6D4]/12 text-[#06B6D4]',
       meta: `${usersDirectory.length} чел.`,
-      onClick: () => setSubSection('contacts'),
+      onClick: () => setActiveTab('people'),
     },
     {
       id: 'favorites',

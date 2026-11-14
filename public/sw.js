@@ -61,9 +61,13 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url);
 
-  // Never cache dynamic API endpoints, Firebase Auth/Firestore streams, Storage uploads, or TURN requests
+  // Never cache dynamic API endpoints, Vite dev modules, Firebase Auth/Firestore streams, Storage uploads, or TURN requests
   if (
-    (url.origin === self.location.origin && url.pathname.startsWith('/api/')) ||
+    (url.origin === self.location.origin &&
+      (url.pathname.startsWith('/api/') ||
+        url.pathname.startsWith('/src/') ||
+        url.pathname.startsWith('/@') ||
+        url.pathname.startsWith('/node_modules/'))) ||
     url.hostname.includes('firestore.googleapis.com') ||
     url.hostname.includes('firebasestorage.googleapis.com') ||
     url.hostname.includes('identitytoolkit.googleapis.com') ||
@@ -114,13 +118,12 @@ self.addEventListener('fetch', event => {
 
   // Hashed Vite static assets (/assets/*) and fonts: Cache-first with background revalidation
   if (
-    url.origin === self.location.origin ||
+    (url.origin === self.location.origin &&
+      (url.pathname.startsWith('/assets/') ||
+        request.destination === 'image' ||
+        request.destination === 'font')) ||
     url.hostname.includes('fonts.googleapis.com') ||
-    url.hostname.includes('fonts.gstatic.com') ||
-    request.destination === 'script' ||
-    request.destination === 'style' ||
-    request.destination === 'font' ||
-    request.destination === 'image'
+    url.hostname.includes('fonts.gstatic.com')
   ) {
     event.respondWith(
       caches.match(request).then(cached => {

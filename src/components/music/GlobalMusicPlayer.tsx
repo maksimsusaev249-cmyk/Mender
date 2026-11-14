@@ -208,8 +208,82 @@ export const GlobalMusicPlayer: React.FC = () => {
           aria-label="Мини-плеер Mender Music"
           className="w-full shrink-0 z-30 bg-[#121621] border-t border-[#222B3E] text-[#F1F5F9] shadow-[0_-6px_24px_rgba(0,0,0,0.45)] select-none"
         >
-          {/* Тонкая полоса перемотки сверху мини-плеера */}
-          <div className="w-full px-3 sm:px-4 pt-1.5 flex items-center gap-2">
+          {/* Тонкая визуальная полоса прогресса для мобильной версии */}
+          <div className="sm:hidden w-full h-[2px] bg-[#242D42] overflow-hidden">
+            <div
+              className="h-full bg-[#0077FF] transition-all duration-200"
+              style={{ width: `${Math.min(100, (clampedTime / totalDuration) * 100)}%` }}
+            />
+          </div>
+
+          {/* Мобильный однострочный мини-плеер (< sm) */}
+          <div className="sm:hidden px-3 py-1.5 flex items-center justify-between gap-2">
+            <div
+              onClick={() => setIsFullScreenPlayerOpen(true)}
+              className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer"
+              title="Открыть полноэкранный плеер"
+            >
+              <div className="relative w-9 h-9 rounded-lg overflow-hidden shrink-0 border border-[#0077FF]/40 bg-[#1B2233]">
+                <img
+                  src={currentTrack.coverUrl || BUILTIN_MUSIC_COVERS.aurora}
+                  alt={currentTrack.title}
+                  referrerPolicy="no-referrer"
+                  onError={e => {
+                    e.currentTarget.src = BUILTIN_MUSIC_COVERS.aurora;
+                  }}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-bold text-white truncate">
+                  {currentTrack.title}
+                </div>
+                <div className="text-[11px] text-[#8E9BAE] truncate">
+                  {currentTrack.artist} ·{' '}
+                  <span className={isPlaying ? 'text-[#52A8FF]' : 'text-amber-400'}>
+                    {isPlaying ? 'В фоне' : 'Пауза'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => (isPlaying ? pauseMusic() : void resumeMusic())}
+                className="w-10 h-10 rounded-xl bg-[#0077FF] hover:bg-[#0066EA] text-white flex items-center justify-center active:scale-95 cursor-pointer transition-all"
+                title={isPlaying ? 'Пауза' : 'Продолжить'}
+                aria-label={isPlaying ? 'Пауза' : 'Продолжить'}
+              >
+                {isPlaying ? (
+                  <TransportPauseIcon className="w-4 h-4" />
+                ) : (
+                  <TransportPlayIcon className="w-4 h-4" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => void nextTrack()}
+                className="w-10 h-10 rounded-xl bg-[#181D2B] hover:bg-[#232B3E] text-[#CBD5E1] hover:text-white flex items-center justify-center active:scale-95 cursor-pointer transition-all"
+                title="Следующий трек"
+                aria-label="Следующий трек"
+              >
+                <TransportNextIcon className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={closePlayer}
+                className="w-10 h-10 rounded-xl hover:bg-rose-500/20 text-[#8E9BAE] hover:text-rose-300 flex items-center justify-center active:scale-95 cursor-pointer transition-all"
+                title="Закрыть плеер"
+                aria-label="Закрыть плеер"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Полоса перемотки сверху мини-плеера (>= sm) */}
+          <div className="hidden sm:flex w-full px-4 pt-1.5 items-center gap-2">
             <span className="text-[10px] font-mono text-[#8E9BAE] tabular-nums w-8 text-right shrink-0">
               {formatMusicDuration(clampedTime)}
             </span>
@@ -228,7 +302,8 @@ export const GlobalMusicPlayer: React.FC = () => {
             </span>
           </div>
 
-          <div className="px-3 sm:px-4 py-2 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2">
+          {/* Полная панель мини-плеера (>= sm) */}
+          <div className="hidden sm:flex px-4 py-2 flex-nowrap items-center justify-between gap-2">
             {/* Обложка, название и исполнитель (открывает полноэкранный плеер) */}
             <div
               onClick={() => setIsFullScreenPlayerOpen(true)}
@@ -240,13 +315,16 @@ export const GlobalMusicPlayer: React.FC = () => {
                   src={currentTrack.coverUrl || BUILTIN_MUSIC_COVERS.aurora}
                   alt={currentTrack.title}
                   referrerPolicy="no-referrer"
+                  onError={e => {
+                    e.currentTarget.src = BUILTIN_MUSIC_COVERS.aurora;
+                  }}
                   className="w-full h-full object-cover"
                 />
               </div>
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs sm:text-sm font-bold text-white group-hover:text-[#52A8FF] transition-colors truncate">
+                  <span className="text-sm font-bold text-white group-hover:text-[#52A8FF] transition-colors truncate">
                     {currentTrack.title}
                   </span>
                 </div>
@@ -258,36 +336,34 @@ export const GlobalMusicPlayer: React.FC = () => {
                       isPlaying ? 'text-[#52A8FF]' : 'text-amber-400'
                     }`}
                   >
-                    {isPlaying ? 'Играет' : 'На паузе'}
+                    {isPlaying ? 'Играет в фоне' : 'На паузе'}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Элементы управления по эскизу: |◁  ||  ▷  □  ▷| + Громкость и Полноэкранный режим */}
-            <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0 w-full sm:w-auto">
+            {/* Элементы управления: |◁  ||  ▷  □  ▷| + Громкость и Полноэкранный режим */}
+            <div className="flex items-center justify-end gap-2 shrink-0">
               <div
                 className="flex items-center gap-1 bg-[#181D2B] border border-[#252E42] rounded-xl p-1"
                 role="group"
                 aria-label="Управление воспроизведением"
               >
-                {/* 1. Предыдущий трек (|◁) */}
                 <button
                   type="button"
                   onClick={() => void prevTrack()}
-                  className="w-9 h-9 sm:w-10 sm:h-9 rounded-lg flex items-center justify-center text-[#CBD5E1] hover:text-white hover:bg-[#232B3E] active:scale-95 cursor-pointer transition-all"
+                  className="w-10 h-9 rounded-lg flex items-center justify-center text-[#CBD5E1] hover:text-white hover:bg-[#232B3E] active:scale-95 cursor-pointer transition-all"
                   title="Предыдущий трек"
                   aria-label="Предыдущий трек"
                 >
                   <TransportPrevIcon className="w-4 h-4" />
                 </button>
 
-                {/* 2. Пауза (||) */}
                 <button
                   type="button"
                   onClick={pauseMusic}
                   disabled={!isPlaying}
-                  className={`w-9 h-9 sm:w-10 sm:h-9 rounded-lg flex items-center justify-center active:scale-95 transition-all ${
+                  className={`w-10 h-9 rounded-lg flex items-center justify-center active:scale-95 transition-all ${
                     isPlaying
                       ? 'bg-[#252E44] hover:bg-[#2E3954] text-white cursor-pointer'
                       : 'text-[#64748B] opacity-55 cursor-default'
@@ -298,12 +374,11 @@ export const GlobalMusicPlayer: React.FC = () => {
                   <TransportPauseIcon className="w-4 h-4" />
                 </button>
 
-                {/* 3. Продолжить / Включить (▷) */}
                 <button
                   type="button"
                   onClick={() => void resumeMusic()}
                   disabled={isPlaying}
-                  className={`w-9 h-9 sm:w-10 sm:h-9 rounded-lg flex items-center justify-center active:scale-95 transition-all ${
+                  className={`w-10 h-9 rounded-lg flex items-center justify-center active:scale-95 transition-all ${
                     !isPlaying
                       ? 'bg-[#0077FF] hover:bg-[#0066EA] text-white shadow-sm shadow-[#0077FF]/35 cursor-pointer'
                       : 'text-[#52A8FF] bg-[#0077FF]/15 cursor-default'
@@ -314,22 +389,20 @@ export const GlobalMusicPlayer: React.FC = () => {
                   <TransportPlayIcon className="w-4 h-4" />
                 </button>
 
-                {/* 4. Стоп / Закрыть мини-плеер (□) */}
                 <button
                   type="button"
                   onClick={closePlayer}
-                  className="w-9 h-9 sm:w-10 sm:h-9 rounded-lg flex items-center justify-center text-[#CBD5E1] hover:text-rose-300 hover:bg-rose-500/20 active:scale-95 cursor-pointer transition-all"
+                  className="w-10 h-9 rounded-lg flex items-center justify-center text-[#CBD5E1] hover:text-rose-300 hover:bg-rose-500/20 active:scale-95 cursor-pointer transition-all"
                   title="Остановить музыку и закрыть плеер"
                   aria-label="Остановить музыку и закрыть плеер"
                 >
                   <TransportStopIcon className="w-4 h-4" />
                 </button>
 
-                {/* 5. Следующий трек (▷|) */}
                 <button
                   type="button"
                   onClick={() => void nextTrack()}
-                  className="w-9 h-9 sm:w-10 sm:h-9 rounded-lg flex items-center justify-center text-[#CBD5E1] hover:text-white hover:bg-[#232B3E] active:scale-95 cursor-pointer transition-all"
+                  className="w-10 h-9 rounded-lg flex items-center justify-center text-[#CBD5E1] hover:text-white hover:bg-[#232B3E] active:scale-95 cursor-pointer transition-all"
                   title="Следующий трек"
                   aria-label="Следующий трек"
                 >
@@ -337,7 +410,6 @@ export const GlobalMusicPlayer: React.FC = () => {
                 </button>
               </div>
 
-              {/* Громкость на ПК */}
               <div className="hidden lg:flex items-center gap-1.5 px-1.5">
                 <button
                   type="button"
@@ -364,7 +436,6 @@ export const GlobalMusicPlayer: React.FC = () => {
                 />
               </div>
 
-              {/* Открыть полноэкранный плеер */}
               <button
                 type="button"
                 onClick={() => setIsFullScreenPlayerOpen(true)}
@@ -410,7 +481,7 @@ export const GlobalMusicPlayer: React.FC = () => {
 
             <div className="text-center min-w-0 px-2">
               <div className="text-[10px] font-extrabold text-[#52A8FF] uppercase tracking-wider">
-                Mender Music
+                {isPlaying ? 'Mender Music · Фоновый режим' : 'Mender Music · Пауза'}
               </div>
               <div className="text-[11px] text-[#94A3B8] truncate">{currentTrack.albumTitle}</div>
             </div>

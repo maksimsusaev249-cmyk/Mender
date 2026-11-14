@@ -21,8 +21,10 @@ import { CreateGroupModal } from './components/chats/CreateGroupModal';
 import { WallpaperStudioModal } from './components/wallpapers/WallpaperStudioModal';
 import { SearchModal } from './components/search/SearchModal';
 import { UserProfileModal } from './components/profile/UserProfileModal';
+import { PeopleView } from './components/people/PeopleView';
+import { Avatar } from './components/common/Avatar';
 
-import { Search, Sparkles, ChevronDown, MessageSquare, PhoneCall, Sun, Moon, Palette, Film, Music, WifiOff, X, Download, CheckCircle2 } from 'lucide-react';
+import { Search, Sun, Moon, Palette, WifiOff, X, Download, CheckCircle2 } from 'lucide-react';
 import {
   APP_VERSION_FULL,
   APP_BUILD_NUMBER,
@@ -44,7 +46,7 @@ const MainMessenger: React.FC = () => {
     needsOnboarding,
     needsPinSetup,
   } = useAuth();
-  const { activeTab, setActiveTab, activeChatId } = useChat();
+  const { activeTab, setActiveTab, activeChatId, activeChat } = useChat();
 
   const [createModalType, setCreateModalType] = useState<'direct' | 'group' | null>(null);
   const [showWallpaperModal, setShowWallpaperModal] = useState(false);
@@ -58,23 +60,26 @@ const MainMessenger: React.FC = () => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
     const handleOpenWallpapers = () => setShowWallpaperModal(true);
+    const handleOpenVersions = () => setShowVersionModal(true);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     window.addEventListener('mender:open-wallpapers', handleOpenWallpapers);
+    window.addEventListener('mender:open-versions', handleOpenVersions);
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('mender:open-wallpapers', handleOpenWallpapers);
+      window.removeEventListener('mender:open-versions', handleOpenVersions);
     };
   }, []);
 
   if (!isAuthReady) {
     return (
-      <div className="h-screen w-screen bg-[#EDEEF0] flex flex-col items-center justify-center text-[#19191A] gap-3">
-        <div className="w-12 h-12 rounded-xl bg-[#0077FF] flex items-center justify-center shadow-md animate-pulse">
-          <span className="text-white font-black text-xl">M</span>
+      <div className="h-screen w-screen bg-[#F6F7F9] flex flex-col items-center justify-center text-[#18191C] gap-3">
+        <div className="w-11 h-11 rounded-2xl bg-[#0077FF] flex items-center justify-center shadow-sm animate-pulse">
+          <span className="text-white font-extrabold text-lg">M</span>
         </div>
-        <span className="text-xs font-medium text-[#818C99]">
+        <span className="text-xs font-medium text-[#7B8494]">
           Подключение к Mender...
         </span>
       </div>
@@ -85,160 +90,123 @@ const MainMessenger: React.FC = () => {
     return <AuthScreen />;
   }
 
+  const isMobileChatOpen = activeTab === 'chats' && Boolean(activeChatId && activeChat);
+
+  const mobileTabTitleMap: Record<string, string> = {
+    chats: 'Mender',
+    people: 'Люди',
+    feed: 'Новости',
+    video: 'Видео',
+    music: 'Музыка',
+    channels: 'Сообщества',
+    calls: 'Звонки',
+    menu: 'Меню',
+    settings: 'Профиль',
+  };
+  const mobileTitle = mobileTabTitleMap[activeTab] || 'Mender';
+
   return (
-    <div className="h-screen w-screen overflow-hidden relative flex flex-col bg-[#EDEEF0] text-[#19191A] transition-colors duration-200">
-      {/* Top Header Bar */}
-      <header className="h-[48px] px-3 md:px-6 flex items-center justify-between border-b bg-white border-[#E1E3E6] text-[#19191A] z-30 shrink-0 select-none">
-        {/* Left: Mender Logo & Brand */}
-        <div className="flex items-center gap-3">
+    <div className="h-[100dvh] w-full overflow-hidden relative flex flex-col bg-[#F6F7F9] text-[#18191C] transition-colors duration-200">
+      {/* Clean Responsive Top Bar (hidden on mobile inside active chat so chat header has full room) */}
+      <header
+        className={`${
+          isMobileChatOpen ? 'hidden md:flex' : 'flex'
+        } h-[52px] w-full px-3 md:px-5 items-center justify-between gap-2 md:gap-4 border-b bg-white border-[#E8EAED] text-[#18191C] z-30 shrink-0 select-none`}
+      >
+        {/* Zone 1: Brand Wordmark + Mobile Section Context */}
+        <button
+          type="button"
+          onClick={() => setActiveTab('chats')}
+          className="flex items-center gap-2 sm:gap-2.5 cursor-pointer group shrink-0"
+        >
+          <div className="w-8 h-8 rounded-xl bg-[#0077FF] group-hover:bg-[#0066EA] flex items-center justify-center text-white font-extrabold text-sm tracking-tight transition-colors">
+            M
+          </div>
+          <span className="md:hidden font-bold text-[16px] tracking-tight text-[#18191C] whitespace-nowrap">
+            {mobileTitle}
+          </span>
+          <span className="hidden md:inline font-bold text-[16px] tracking-tight text-[#18191C] whitespace-nowrap">
+            Mender
+          </span>
+        </button>
+
+        {/* Zone 2: Wide Search Bar on Desktop/Tablet */}
+        <button
+          type="button"
+          onClick={() => setShowSearchModal(true)}
+          className="hidden md:flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs cursor-pointer transition-colors flex-1 min-w-0 max-w-md bg-[#F6F7F9] hover:bg-[#EDEFEF] text-[#7B8494]"
+        >
+          <Search className="w-4 h-4 shrink-0" />
+          <span className="truncate">Поиск людей, чатов, видео и музыки...</span>
+        </button>
+
+        {/* Zone 3: Mobile Compact Search + Theme Switcher & Profile */}
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => setActiveTab('feed')}
-            className="flex items-center gap-2 cursor-pointer group"
-          >
-            <div className="w-7 h-7 rounded-[7px] bg-[#0077FF] hover:bg-[#0066EA] flex items-center justify-center text-white font-extrabold text-sm tracking-tighter shadow-xs transition-colors">
-              M
-            </div>
-            <span className="font-bold text-[16px] tracking-tight hidden sm:inline text-[#19191A] group-hover:text-[#0077FF] transition-colors">
-              Mender
-            </span>
-          </button>
-
-          {/* Индикатор актуальной версии приложения (открывает историю новых версий) */}
-          <button
-            type="button"
-            onClick={() => setShowVersionModal(true)}
-            className="px-2 py-0.5 rounded-md bg-[#EBF3FF] hover:bg-[#DCEBFF] border border-[#0077FF]/30 text-[#0077FF] text-[10px] font-extrabold tracking-tight cursor-pointer transition-colors shrink-0"
-            title={`Текущая версия ${APP_VERSION_FULL} (Build #${APP_BUILD_NUMBER}) — нажмите, чтобы посмотреть список новых версий`}
-          >
-            {APP_VERSION_FULL}
-          </button>
-
-          {/* Search Bar */}
-          <div
             onClick={() => setShowSearchModal(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-[8px] text-xs cursor-pointer transition-colors w-32 sm:w-52 md:w-64 bg-[#EDEFEF] hover:bg-[#E5E7E8] text-[#818C99]"
+            className="md:hidden w-10 h-10 rounded-xl hover:bg-[#F2F4F7] text-[#7B8494] hover:text-[#18191C] flex items-center justify-center cursor-pointer transition-colors"
+            title="Глобальный поиск"
+            aria-label="Поиск"
           >
-            <Search className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">Поиск</span>
-          </div>
-        </div>
-
-        {/* Right: Single Unified Theme Button, Quick Actions & User Profile */}
-        <div className="flex items-center gap-1.5 sm:gap-2 relative">
-          {/* Единая кнопка переключения темы интерфейса (Светлая -> Тёмная -> Свой) */}
-          <div className="relative flex items-center">
-            <button
-              type="button"
-              onClick={() => {
-                const nextMode =
-                  themeMode === 'light' ? 'dark' : themeMode === 'dark' ? 'custom' : 'light';
-                setThemeMode(nextMode);
-              }}
-              className="px-2.5 py-1.5 rounded-lg bg-[#F0F2F5] hover:bg-[#E5E7EB] border border-[#E1E3E6] text-[#19191A] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
-              title={
-                themeMode === 'light'
-                  ? 'Тема: Светлая (нажмите для Тёмной)'
-                  : themeMode === 'dark'
-                  ? 'Тема: Тёмная (нажмите для Своей)'
-                  : 'Тема: Свой фон (нажмите для Светлой)'
-              }
-            >
-              {themeMode === 'light' && <Sun className="w-4 h-4 text-[#0077FF]" />}
-              {themeMode === 'dark' && <Moon className="w-4 h-4 text-[#0077FF]" />}
-              {themeMode === 'custom' && <Palette className="w-4 h-4 text-[#0077FF]" />}
-              <span className="hidden sm:inline text-[11px]">
-                {themeMode === 'light' ? 'Светлая' : themeMode === 'dark' ? 'Тёмная' : 'Свой'}
-              </span>
-            </button>
-
-            {themeMode === 'custom' && (
-              <input
-                type="color"
-                value={customThemeBgColor}
-                onChange={e => setCustomThemeBgColor(e.target.value)}
-                className="w-6 h-6 rounded-md cursor-pointer border border-[#E1E3E6] bg-transparent ml-1"
-                title="Выбрать свой цвет фона приложения"
-              />
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowWallpaperModal(true)}
-            className="p-1.5 rounded-full hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#0077FF] transition-colors cursor-pointer"
-            title="Студия фонов и оформления"
-          >
-            <Sparkles className="w-4 h-4" />
+            <Search className="w-[18px] h-[18px]" />
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('video')}
-            className="hidden sm:flex p-1.5 rounded-full hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#0077FF] transition-colors cursor-pointer"
-            title="Mender Video"
+            onClick={() => {
+              const nextMode =
+                themeMode === 'light' ? 'dark' : themeMode === 'dark' ? 'custom' : 'light';
+              setThemeMode(nextMode);
+            }}
+            className="w-10 h-10 md:w-9 md:h-9 rounded-xl hover:bg-[#F2F4F7] text-[#7B8494] hover:text-[#18191C] flex items-center justify-center cursor-pointer transition-colors"
+            title={
+              themeMode === 'light'
+                ? 'Светлая тема (нажмите для Тёмной)'
+                : themeMode === 'dark'
+                ? 'Тёмная тема (нажмите для Своей)'
+                : 'Свой фон (нажмите для Светлой)'
+            }
           >
-            <Film className="w-4 h-4" />
+            {themeMode === 'light' && <Sun className="w-[18px] h-[18px]" />}
+            {themeMode === 'dark' && <Moon className="w-[18px] h-[18px]" />}
+            {themeMode === 'custom' && <Palette className="w-[18px] h-[18px] text-[#0077FF]" />}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('music')}
-            className="hidden sm:flex p-1.5 rounded-full hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#0077FF] transition-colors cursor-pointer"
-            title="Mender Music"
-          >
-            <Music className="w-4 h-4" />
-          </button>
+          {themeMode === 'custom' && (
+            <input
+              type="color"
+              value={customThemeBgColor}
+              onChange={e => setCustomThemeBgColor(e.target.value)}
+              className="w-7 h-7 rounded-lg cursor-pointer border border-[#E8EAED] bg-transparent"
+              title="Выбрать свой цвет фона"
+            />
+          )}
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('calls')}
-            className="hidden sm:flex p-1.5 rounded-full hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#0077FF] transition-colors cursor-pointer"
-            title="Звонки"
-          >
-            <PhoneCall className="w-4 h-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('chats')}
-            className="hidden sm:flex p-1.5 rounded-full hover:bg-[#EDEFEF] text-[#818C99] hover:text-[#0077FF] transition-colors cursor-pointer"
-            title="Мессенджер"
-          >
-            <MessageSquare className="w-4 h-4" />
-          </button>
-
-          {/* User Profile Pill */}
           <button
             type="button"
             onClick={() => {
               setActiveTab('settings');
               window.dispatchEvent(new CustomEvent('mender:profile-section', { detail: 'profile' }));
             }}
-            className="flex items-center gap-2 pl-1.5 pr-2 py-1 rounded-full hover:bg-[#EDEFEF] cursor-pointer transition-colors"
+            className="flex items-center gap-2 p-1 md:pr-2.5 rounded-xl hover:bg-[#F2F4F7] cursor-pointer transition-colors"
+            title="Мой профиль"
           >
-            {profile?.avatarUrl ? (
-              <img
-                src={profile.avatarUrl}
-                alt={profile.displayName}
-                className="w-7 h-7 rounded-full object-cover border border-[#E1E3E6]"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-[#0077FF] text-white font-bold text-xs flex items-center justify-center">
-                {profile?.displayName?.charAt(0) || 'U'}
-              </div>
-            )}
-            <span className="text-xs font-semibold max-w-[90px] truncate hidden md:inline text-[#19191A]">
-              {profile?.displayName?.split(' ')[0] || 'Моя страница'}
+            <Avatar
+              src={profile?.avatarUrl}
+              name={profile?.displayName || 'Профиль'}
+              className="w-8 h-8 md:w-7 md:h-7 rounded-full border border-[#E8EAED]"
+            />
+            <span className="text-xs font-semibold max-w-[100px] truncate hidden md:inline text-[#18191C]">
+              {profile?.displayName?.split(' ')[0] || 'Профиль'}
             </span>
-            <ChevronDown className="w-3.5 h-3.5 text-[#818C99]" />
           </button>
         </div>
       </header>
 
       {/* Индикатор работы без интернета (Автономный офлайн-режим) */}
       {!isOnline && (
-        <div className="bg-amber-500 text-white px-3 py-1.5 text-xs font-semibold flex items-center justify-center gap-2 z-30 shrink-0 shadow-xs">
+        <div className="bg-amber-500 text-white px-3 py-1.5 text-xs font-semibold flex items-center justify-center gap-2 z-30 shrink-0">
           <WifiOff className="w-3.5 h-3.5 shrink-0" />
           <span className="truncate">
             Автономный режим (без интернета) — чаты, записи и офлайн-видео работают из памяти устройства
@@ -247,30 +215,35 @@ const MainMessenger: React.FC = () => {
       )}
 
       {/* Main Full-Height Workspace */}
-      <div className="relative z-10 flex-1 min-h-0 flex overflow-hidden h-full pb-[58px] md:pb-0">
+      <div
+        className={`relative z-10 flex-1 min-h-0 flex overflow-hidden h-full ${
+          isMobileChatOpen ? 'pb-0' : 'pb-[56px] md:pb-0'
+        }`}
+      >
         <Sidebar />
 
-        <div className="flex-1 min-h-0 flex flex-col overflow-hidden h-full">
-          <main className="flex-1 min-h-0 w-full flex overflow-hidden h-full bg-[#EDEEF0] transition-colors duration-200">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden h-full">
+          <main className="flex-1 min-h-0 min-w-0 w-full flex overflow-hidden h-full bg-[#F6F7F9] transition-colors duration-200">
             {activeTab === 'chats' && (
-              <div className="flex-1 flex overflow-hidden h-full">
+              <div className="flex-1 min-w-0 w-full flex overflow-hidden h-full">
                 <div
                   className={`${
-                    activeChatId ? 'hidden md:flex' : 'flex'
-                  } w-full md:w-[320px] lg:w-[350px] h-full border-r border-[#E1E3E6] bg-white shrink-0`}
+                    isMobileChatOpen ? 'hidden md:flex' : 'flex'
+                  } w-full md:w-[330px] lg:w-[370px] min-w-0 h-full border-r border-[#E1E3E6] bg-white shrink-0 overflow-hidden`}
                 >
                   <ChatList />
                 </div>
                 <div
                   className={`${
-                    activeChatId ? 'flex' : 'hidden md:flex'
-                  } flex-1 overflow-hidden h-full`}
+                    isMobileChatOpen ? 'flex' : 'hidden md:flex'
+                  } flex-1 min-w-0 overflow-hidden h-full`}
                 >
                   <ChatWindow />
                 </div>
               </div>
             )}
 
+            {activeTab === 'people' && <PeopleView />}
             {activeTab === 'feed' && <SocialFeed />}
             {activeTab === 'menu' && <MenuHubView />}
             {activeTab === 'video' && <MenderVideoView />}

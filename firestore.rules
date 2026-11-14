@@ -184,12 +184,18 @@ service cloud.firestore {
 
     function isValidUserMembership(data) {
       return data.keys().hasAll(['userId', 'chatId', 'role', 'isPinned', 'isMuted', 'joinedAt', 'updatedAt'])
-      && data.keys().hasOnly(['userId', 'chatId', 'role', 'isPinned', 'isMuted', 'joinedAt', 'updatedAt'])
+      && data.keys().hasOnly([
+        'userId', 'chatId', 'role', 'isPinned', 'isMuted',
+        'isArchived', 'isHidden', 'clearedAtMs', 'joinedAt', 'updatedAt'
+      ])
       && isValidId(data.userId)
       && isValidId(data.chatId)
       && data.role is string && data.role.size() <= 20 && data.role in ['owner', 'admin', 'moderator', 'member']
       && data.isPinned is bool
       && data.isMuted is bool
+      && (!('isArchived' in data) || data.isArchived is bool)
+      && (!('isHidden' in data) || data.isHidden is bool)
+      && (!('clearedAtMs' in data) || (data.clearedAtMs is int && data.clearedAtMs >= 0))
       && data.joinedAt is timestamp
       && data.updatedAt is timestamp;
     }
@@ -267,6 +273,16 @@ service cloud.firestore {
       && (!('forwardedFromName' in data) || (data.forwardedFromName is string && data.forwardedFromName.size() <= 80))
       && (!('deletedForUserIds' in data) || (data.deletedForUserIds is list && data.deletedForUserIds.size() <= 100))
       && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidTypingStatus(data) {
+      return data.keys().hasAll(['chatId', 'userId', 'displayName', 'isTyping', 'updatedAt'])
+      && data.keys().hasOnly(['chatId', 'userId', 'displayName', 'isTyping', 'updatedAt'])
+      && isValidId(data.chatId)
+      && isValidId(data.userId)
+      && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80
+      && data.isTyping is bool
       && data.updatedAt is timestamp;
     }
 
@@ -739,6 +755,11 @@ service cloud.firestore {
               ||
               (exists(/databases/$(database)/documents/chats/$(chatId)/members/$(userId))
                 && incoming().role == get(/databases/$(database)/documents/chats/$(chatId)/members/$(userId)).data.role)
+              ||
+              (exists(/databases/$(database)/documents/chats/$(chatId))
+                && get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'direct'
+                && get(/databases/$(database)/documents/chats/$(chatId)).data.peerUserId == request.auth.uid
+                && incoming().role == 'member')
             ))
             ||
             (existsAfter(/databases/$(database)/documents/chats/$(chatId))
@@ -759,7 +780,9 @@ service cloud.firestore {
           && incoming().joinedAt == existing().joinedAt
           && incoming().updatedAt == request.time
           && (
-            (isOwner(userId) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['isPinned', 'isMuted', 'updatedAt']))
+            (isOwner(userId) && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly([
+              'isPinned', 'isMuted', 'isArchived', 'isHidden', 'clearedAtMs', 'updatedAt'
+            ]))
             ||
             (
               exists(/databases/$(database)/documents/chats/$(chatId))
@@ -1053,7 +1076,10 @@ service cloud.firestore {
 
       allow delete: if isVerified()
         && isValidId(chatId)
-        && isOwner(existing().ownerId);
+        && (
+          isOwner(existing().ownerId)
+          || (existing().type == 'direct' && isOwner(existing().peerUserId))
+        );
 
       match /members/{memberId} {
         allow get: if isSignedIn()
@@ -1227,7 +1253,64 @@ service cloud.firestore {
           && (
             isOwner(existing().senderId)
             || isOwner(existing().recipientId)
-            || (exists(/databases/$(database)/documents/chats/$(chatId)) && get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid)
+            || (exists(/databases/$(database)/documents/chats/$(chatId)) && (
+              get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+              || (get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'direct' && get(/databases/$(database)/documents/chats/$(chatId)).data.peerUserId == request.auth.uid)
+            ))
+          );
+      }
+
+      match /typing/{typingUserId} {
+        allow get: if isSignedIn()
+          && isValidId(chatId)
+          && isValidId(typingUserId)
+          && (
+            get(/databases/$(database)/documents/chats/$(chatId)).data.visibility == 'public'
+            || get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+            || get(/databases/$(database)/documents/chats/$(chatId)).data.peerUserId == request.auth.uid
+            || isChatMember(chatId)
+          );
+
+        allow list: if isSignedIn()
+          && existing().chatId == chatId
+          && existing().isTyping is bool;
+
+        allow create: if isVerified()
+          && isValidId(chatId)
+          && isValidId(typingUserId)
+          && isOwner(typingUserId)
+          && isValidTypingStatus(incoming())
+          && incoming().chatId == chatId
+          && incoming().userId == typingUserId
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/chats/$(chatId))
+          && (
+            get(/databases/$(database)/documents/chats/$(chatId)).data.visibility == 'public'
+            || get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+            || get(/databases/$(database)/documents/chats/$(chatId)).data.peerUserId == request.auth.uid
+            || isChatMember(chatId)
+          );
+
+        allow update: if isVerified()
+          && isValidId(chatId)
+          && isValidId(typingUserId)
+          && isOwner(typingUserId)
+          && isValidTypingStatus(incoming())
+          && incoming().chatId == existing().chatId
+          && incoming().userId == existing().userId
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'isTyping', 'updatedAt']);
+
+        allow delete: if isVerified()
+          && isValidId(chatId)
+          && isValidId(typingUserId)
+          && (
+            isOwner(typingUserId)
+            || isOwner(existing().userId)
+            || (exists(/databases/$(database)/documents/chats/$(chatId)) && (
+              get(/databases/$(database)/documents/chats/$(chatId)).data.ownerId == request.auth.uid
+              || (get(/databases/$(database)/documents/chats/$(chatId)).data.type == 'direct' && get(/databases/$(database)/documents/chats/$(chatId)).data.peerUserId == request.auth.uid)
+            ))
           );
       }
     }

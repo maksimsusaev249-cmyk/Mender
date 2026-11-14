@@ -4,6 +4,24 @@ import './index.css';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
+    if (import.meta.env.DEV) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then(regs => Promise.all(regs.map(r => r.unregister())))
+        .catch(() => {});
+      if ('caches' in window) {
+        caches
+          .keys()
+          .then(keys =>
+            Promise.all(
+              keys.filter(k => k.startsWith('mender-')).map(k => caches.delete(k))
+            )
+          )
+          .catch(() => {});
+      }
+      return;
+    }
+
     let isRefreshing = false;
     const hadController = Boolean(navigator.serviceWorker.controller);
 
